@@ -2,9 +2,25 @@ import React, { useState } from 'react';
 import { Card, Toggle, Button, Input, TextArea, Select } from '../UIComponents';
 import { FcFeedback, FcComments, FcExport, FcCheckmark as FcSent, FcQuestions, FcDown, FcUp, FcAlarmClock, FcClock, FcHighPriority, FcAbout, FcFlashOn, FcPlus, FcInspection, FcCancel, FcIdea } from 'react-icons/fc';
 import { Pencil, Trash2, Send, X } from 'lucide-react';
+import { supabase } from '../../lib/supabaseClient';
 
-// --- Notifications Section ---
-export const NotificationsSection: React.FC = () => {
+// --- Local Knowledge Base (Simulated RAG Source) ---
+const KNOWLEDGE_BASE = [
+  { keywords: ['pricing', 'cost', 'plan', 'billing'], answer: "We offer Free, Pro ($29/mo), and Enterprise ($99/mo) plans. You can view details in the 'Pricing Plans' tab.", category: 'Billing' },
+  { keywords: ['password', 'reset', 'login', 'access'], answer: "You can change your password in the Security section. usage: Go to Security > Password > Edit.", category: 'Security' },
+  { keywords: ['referral', 'invite', 'commission'], answer: "Earn 500 demo credits for every friend you invite. Check the 'Referral' section for your unique code.", category: 'Growth' },
+  { keywords: ['api', 'key', 'developer'], answer: "API keys are available for Admin users in the 'Integrations' panel (coming soon).", category: 'Technical' },
+  { keywords: ['receipt', 'invoice', 'history'], answer: "All past invoices are downloadable from the 'Billing History' table in the Billing section.", category: 'Billing' }
+];
+
+// --- Notifications Section (Main Wrapper) ---
+// We accept 'context' props to make the bot aware of where the user is
+interface NotificationsSectionProps {
+  currentContext?: string; // e.g., 'billing', 'profile', 'security'
+}
+
+export const NotificationsSection: React.FC<NotificationsSectionProps> = ({ currentContext = 'general' }) => {
+  const [loading, setLoading] = useState(false);
   // Master Toggle State
   const [pushEnabled, setPushEnabled] = useState(true);
 
@@ -30,6 +46,67 @@ export const NotificationsSection: React.FC = () => {
 
   const removeTimer = (val: number) => {
     setTimers(timers.filter(t => t !== val));
+  };
+
+  // Fetch Settings on Mount
+  React.useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from('notification_settings')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        if (data) {
+          setPushEnabled(data.push_enabled);
+          setNotifySettings({
+            meetingReminders: data.meeting_reminders,
+            accountAlerts: data.account_alerts,
+            systemAnnouncements: data.system_announcements,
+            productUpdates: data.product_updates,
+          });
+          if (data.timers && Array.isArray(data.timers)) {
+            setTimers(data.timers);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading notification settings:', error);
+      }
+    };
+    fetchSettings();
+  }, []);
+
+  const handleSavePreferences = async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user logged in");
+
+      const updates = {
+        user_id: user.id,
+        push_enabled: pushEnabled,
+        meeting_reminders: notifySettings.meetingReminders,
+        account_alerts: notifySettings.accountAlerts,
+        system_announcements: notifySettings.systemAnnouncements,
+        product_updates: notifySettings.productUpdates,
+        timers: timers,
+        updated_at: new Date(),
+      };
+
+      const { error } = await supabase.from('notification_settings').upsert(updates);
+      if (error) throw error;
+
+      alert("Preferences Saved Successfully!");
+    } catch (error: any) {
+      console.error('Error saving settings:', error);
+      alert("Failed to save settings: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -159,7 +236,11 @@ export const NotificationsSection: React.FC = () => {
       </Card>
 
       <div className="flex justify-end pt-4">
-        <Button onClick={() => alert("Preferences Saved")}>Save Preferences</Button>
+        <div className="flex justify-end pt-4">
+          <Button onClick={handleSavePreferences} disabled={loading}>
+            {loading ? 'Saving...' : 'Save Preferences'}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -197,7 +278,106 @@ const FAQItem: React.FC<{ question: string; answer: string }> = ({ question, ans
 export const AboutSection: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'contact' | 'email' | 'faq' | 'feedback'>('faq');
   const [supportForm, setSupportForm] = useState({ category: 'Technical', priority: 'Medium', subject: '', desc: '' });
+  const [feedbackForm, setFeedbackForm] = useState({ topic: 'General', message: '' });
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // --- Chatbot Logic (Moved from NotificationsSection) ---
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; source?: string }[]>([
+    { role: 'assistant', content: "Hello! 👋 How can I help you regarding your settings, billing, or account today?" }
+  ]);
+  const [inputMsg, setInputMsg] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  // Simulated RAG Retrieval
+  const retrieveAnswer = (query: string) => {
+    const lowerQuery = query.toLowerCase();
+    const match = KNOWLEDGE_BASE.find(item => item.keywords.some(k => lowerQuery.includes(k)));
+
+    if (match) return { text: match.answer, source: 'Knowledge Base' };
+
+    if (lowerQuery.includes('ticket') || lowerQuery.includes('support')) {
+      return { text: "You can raise a support ticket right here. Click the 'Raise a Ticket' tab above.", source: 'System' };
+    }
+
+    return null;
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputMsg.trim()) return;
+
+    const userText = inputMsg;
+    setMessages(prev => [...prev, { role: 'user', content: userText }]);
+    setInputMsg('');
+    setIsTyping(true);
+
+    setTimeout(() => {
+      const retrieval = retrieveAnswer(userText);
+      let botResponse = "";
+      let source = "";
+
+      if (retrieval) {
+        botResponse = retrieval.text;
+        source = retrieval.source;
+      } else {
+        botResponse = "I'm not sure about that specific detail. Since I couldn't find a validated answer, I recommend raising a ticket for our human support team.";
+        source = "Fallback";
+      }
+
+      setMessages(prev => [...prev, { role: 'assistant', content: botResponse, source }]);
+      setIsTyping(false);
+    }, 1000);
+  };
+
+  const handleTicketSubmit = async () => {
+    try {
+      setIsSubmitting(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase.from('support_tickets').insert({
+        user_id: user.id,
+        category: supportForm.category,
+        priority: supportForm.priority,
+        subject: supportForm.subject,
+        description: supportForm.desc,
+      });
+
+      if (error) throw error;
+
+      alert("Ticket Created Successfully! We'll get back to you shortly.");
+      setSupportForm({ category: 'Technical', priority: 'Medium', subject: '', desc: '' });
+    } catch (error: any) {
+      console.error('Error creating ticket:', error);
+      alert('Failed to create ticket: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleFeedbackSubmit = async () => {
+    try {
+      setIsSubmitting(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase.from('feedback_submissions').insert({
+        user_id: user.id,
+        topic: feedbackForm.topic,
+        message: feedbackForm.message,
+      });
+
+      if (error) throw error;
+
+      alert("Thank you for your feedback! We appreciate it.");
+      setFeedbackForm({ topic: 'General', message: '' });
+    } catch (error: any) {
+      console.error('Error submitting feedback:', error);
+      alert('Failed to submit feedback: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const faqs = [
     {
@@ -312,8 +492,8 @@ export const AboutSection: React.FC = () => {
               />
 
               <div className="flex justify-end pt-4">
-                <Button onClick={() => alert("Ticket Created! Reference #9921")} className="w-full sm:w-auto flex items-center">
-                  <span className="mr-2"><FcSent size={16} /></span> Submit Ticket
+                <Button onClick={handleTicketSubmit} disabled={isSubmitting} className="w-full sm:w-auto flex items-center">
+                  <span className="mr-2"><FcSent size={16} /></span> {isSubmitting ? 'Submitting...' : 'Submit Ticket'}
                 </Button>
               </div>
             </div>
@@ -364,20 +544,20 @@ export const AboutSection: React.FC = () => {
                   { value: 'Feature', label: 'New Feature Idea' },
                   { value: 'Other', label: 'Other' }
                 ]}
-                value="General"
-                onChange={() => { }}
+                value={feedbackForm.topic}
+                onChange={(e) => setFeedbackForm({ ...feedbackForm, topic: e.target.value })}
               />
               <TextArea
                 label="Your Thoughts"
                 rows={6}
                 placeholder="Tell us more..."
-                value=""
-                onChange={() => { }}
+                value={feedbackForm.message}
+                onChange={(e) => setFeedbackForm({ ...feedbackForm, message: e.target.value })}
               />
 
               <div className="flex justify-end pt-2">
-                <Button onClick={() => alert("Thank you for your feedback!")} className="w-full sm:w-auto">
-                  Submit Feedback
+                <Button onClick={handleFeedbackSubmit} disabled={isSubmitting} className="w-full sm:w-auto">
+                  {isSubmitting ? 'Submitting...' : 'Submit Feedback'}
                 </Button>
               </div>
             </div>
@@ -418,48 +598,49 @@ export const AboutSection: React.FC = () => {
               </button>
             </div>
 
-            {/* Chat Area */}
-            <div className="flex-1 p-6 bg-gray-50 overflow-y-auto space-y-6">
-              <div className="flex items-start gap-4">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 mt-1">
-                  <FcComments size={18} />
-                </div>
-                <div className="flex flex-col gap-1 max-w-[85%]">
-                  <span className="text-xs text-gray-400 ml-1">LeadQ Assistant • Just now</span>
-                  <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border border-gray-100 text-gray-800 leading-relaxed">
-                    Hello! 👋 How can I help you regarding your settings, billing, or account today?
+            {/* Chat Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+              {messages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] p-3 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none shadow-sm'}`}>
+                    <p className="text-sm">{msg.content}</p>
+                    {msg.source && msg.source !== 'System' && (
+                      <p className="text-[10px] mt-1 opacity-60 uppercase tracking-wider font-semibold flex items-center gap-1">
+                        <FcIdea size={10} /> source: {msg.source}
+                      </p>
+                    )}
                   </div>
                 </div>
-              </div>
-
-              <div className="flex items-start gap-4">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 mt-1">
-                  <FcComments size={18} />
-                </div>
-                <div className="flex flex-col gap-1 max-w-[85%]">
-                  <span className="text-xs text-gray-400 ml-1">LeadQ Assistant • Just now</span>
-                  <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border border-gray-100 text-gray-800 leading-relaxed">
-                    You can ask me about:
-                    <ul className="list-disc list-inside mt-2 space-y-1 text-gray-600">
-                      <li>Resetting your password</li>
-                      <li>Upgrading your plan</li>
-                      <li>Adding team members</li>
-                    </ul>
+              ))}
+              {isTyping && (
+                <div className="flex justify-start">
+                  <div className="bg-white p-3 rounded-2xl rounded-bl-none border border-gray-200 shadow-sm">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75" />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150" />
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* Input Area */}
-            <div className="p-5 bg-white border-t border-gray-100 shrink-0">
-              <div className="flex gap-3 items-center">
+            {/* Chat Footer */}
+            <div className="p-4 bg-white border-t border-gray-100">
+              <div className="flex items-center space-x-2">
                 <input
                   type="text"
-                  placeholder="Type your message here..."
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-full px-5 py-3 text-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none"
-                  autoFocus
+                  placeholder="Ask a question..."
+                  className="flex-1 bg-gray-100 border-0 rounded-full px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+                  value={inputMsg}
+                  onChange={(e) => setInputMsg(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                 />
-                <button className="bg-indigo-600 text-white w-12 h-12 rounded-full flex items-center justify-center hover:bg-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5 transition-all">
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!inputMsg.trim() || isTyping}
+                  className="bg-indigo-600 text-white w-12 h-12 rounded-full flex items-center justify-center hover:bg-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Send size={20} className="text-white ml-1" />
                 </button>
               </div>

@@ -27,7 +27,13 @@ const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRo
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Edit Form State
-  const [splitNames, setSplitNames] = useState({ firstName: '', lastName: '' });
+  const [splitNames, setSplitNames] = useState(() => {
+    if (data.fullName) {
+      const parts = data.fullName.split(' ');
+      return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') || '' };
+    }
+    return { firstName: '', lastName: '' };
+  });
   const [errors, setErrors] = useState<{ fullName?: string; email?: string; firstName?: string; lastName?: string }>({});
 
   const startEditing = () => {
@@ -214,8 +220,15 @@ const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRo
                 label={<span>First Name <span className="text-red-500">*</span></span>}
                 value={splitNames.firstName}
                 onChange={e => {
-                  setSplitNames({ ...splitNames, firstName: e.target.value });
+                  const val = e.target.value;
+                  setSplitNames(prev => ({ ...prev, firstName: val }));
                   if (errors.firstName) setErrors(prev => ({ ...prev, firstName: undefined }));
+
+                  // Sync to parent immediately in forceEditMode
+                  if (forceEditMode) {
+                    const full = [val, splitNames.lastName].filter(Boolean).join(' ');
+                    setData({ ...data, fullName: full });
+                  }
                 }}
                 error={errors.firstName}
                 placeholder="Ex. Jane"
@@ -224,8 +237,15 @@ const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRo
                 label="Last Name"
                 value={splitNames.lastName}
                 onChange={e => {
-                  setSplitNames({ ...splitNames, lastName: e.target.value });
+                  const val = e.target.value;
+                  setSplitNames(prev => ({ ...prev, lastName: val }));
                   if (errors.lastName) setErrors(prev => ({ ...prev, lastName: undefined }));
+
+                  // Sync to parent immediately in forceEditMode
+                  if (forceEditMode) {
+                    const full = [splitNames.firstName, val].filter(Boolean).join(' ');
+                    setData({ ...data, fullName: full });
+                  }
                 }}
                 error={errors.lastName}
                 placeholder="Ex. Doe"

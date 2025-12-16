@@ -3,6 +3,7 @@ import { Card, Button, Input, Badge } from '../UIComponents';
 import { UserRole } from '../../types';
 import { FcCheckmark, FcMoneyTransfer, FcDownload, FcFlashOn, FcVip, FcPlus, FcPhoneAndroid, FcCancel, FcDocument, FcClock, FcVideoCall, FcFeedback, FcInspection, FcUp, FcDown } from 'react-icons/fc';
 import { Trash2 } from 'lucide-react';
+import { supabase } from '../../lib/supabaseClient';
 
 interface Props {
     userRole: UserRole;
@@ -25,6 +26,27 @@ const BillingPricingSection: React.FC<Props> = ({ userRole }) => {
 
     const [isEditingBilling, setIsEditingBilling] = useState(false);
     const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+    const [invoices, setInvoices] = useState<any[]>([]);
+    const [loadingInvoices, setLoadingInvoices] = useState(false);
+
+    React.useEffect(() => {
+        if (activeTab === 'billing') {
+            const fetchInvoices = async () => {
+                setLoadingInvoices(true);
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    const { data } = await supabase
+                        .from('invoices')
+                        .select('*')
+                        .eq('user_id', user.id)
+                        .order('invoice_date', { ascending: false });
+                    if (data) setInvoices(data);
+                }
+                setLoadingInvoices(false);
+            };
+            fetchInvoices();
+        }
+    }, [activeTab]);
 
     // Payment Methods State
     const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
@@ -445,18 +467,26 @@ const BillingPricingSection: React.FC<Props> = ({ userRole }) => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                <tr>
-                                    <td className="px-6 py-4 text-sm text-gray-900">Dec 01, 2025</td>
-                                    <td className="px-6 py-4 text-sm text-gray-900">$49.00</td>
-                                    <td className="px-6 py-4"><Badge variant="success">Paid</Badge></td>
-                                    <td className="px-6 py-4 text-right"><Button variant="ghost" size="sm"><FcDownload size={14} /></Button></td>
-                                </tr>
-                                <tr>
-                                    <td className="px-6 py-4 text-sm text-gray-900">Nov 01, 2025</td>
-                                    <td className="px-6 py-4 text-sm text-gray-900">$49.00</td>
-                                    <td className="px-6 py-4"><Badge variant="success">Paid</Badge></td>
-                                    <td className="px-6 py-4 text-right"><Button variant="ghost" size="sm"><FcDownload size={14} /></Button></td>
-                                </tr>
+                                {loadingInvoices ? (
+                                    <tr><td colSpan={4} className="p-4 text-center text-gray-500">Loading invoices...</td></tr>
+                                ) : invoices.length === 0 ? (
+                                    <tr><td colSpan={4} className="p-4 text-center text-gray-500">No invoices found.</td></tr>
+                                ) : (
+                                    invoices.map((inv) => (
+                                        <tr key={inv.id}>
+                                            <td className="px-6 py-4 text-sm text-gray-900">{new Date(inv.invoice_date).toLocaleDateString()}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-900">${inv.amount}</td>
+                                            <td className="px-6 py-4"><Badge variant={inv.status === 'Paid' ? 'success' : inv.status === 'Pending' ? 'warning' : 'neutral'}>{inv.status}</Badge></td>
+                                            <td className="px-6 py-4 text-right">
+                                                {inv.pdf_url && (
+                                                    <Button variant="ghost" size="sm" onClick={() => window.open(inv.pdf_url, '_blank')}>
+                                                        <FcDownload size={14} />
+                                                    </Button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </Card>

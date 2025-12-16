@@ -1,0 +1,156 @@
+import React, { useState } from 'react';
+import { Card, Button, Badge, Select } from '../UIComponents';
+import { UserRole } from '../../types';
+import { FcDisplay, FcPhoneAndroid, FcExport, FcDownload, FcHighPriority, FcDatabase } from 'react-icons/fc';
+import { Trash2 } from 'lucide-react';
+
+interface Props {
+  userRole: UserRole;
+}
+
+const AdminSection: React.FC<Props> = ({ userRole }) => {
+  const [sessions, setSessions] = useState([
+    { id: '1', device: 'MacBook Pro', browser: 'Chrome', ip: '192.168.1.123', location: 'San Francisco, US', lastActive: 'Now', isCurrent: true, type: 'desktop' },
+    { id: '2', device: 'iPhone 13', browser: 'Safari', ip: '10.0.0.52', location: 'San Francisco, US', lastActive: '2 hrs ago', isCurrent: false, type: 'mobile' },
+    { id: '3', device: 'Windows PC', browser: 'Edge', ip: '172.16.0.4', location: 'New York, US', lastActive: '2 days ago', isCurrent: false, type: 'desktop' },
+  ]);
+
+  const [retentionPeriod, setRetentionPeriod] = useState('1_year');
+
+  const handleLogout = (id: string) => {
+    if (confirm("Are you sure? The user/device will be logged out.")) {
+      setSessions(sessions.filter(s => s.id !== id));
+    }
+  };
+
+  const handleLogoutAll = () => {
+    if (confirm("Are you sure you want to log out from all devices? This will terminate all active sessions except your current one.")) {
+      setSessions(sessions.filter(s => s.isCurrent));
+    }
+  };
+
+  const canManageSessions = userRole === UserRole.SUPER_ADMIN || userRole === UserRole.ADMIN;
+  const isSuperAdmin = userRole === UserRole.SUPER_ADMIN;
+
+  return (
+    <div className="space-y-6">
+      <Card title="Active Sessions" description="Manage devices where your account is currently logged in.">
+        <div className="flex justify-end -mt-16 mb-6">
+          {canManageSessions && (
+            <Button variant="secondary" className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 transform translate-y-2" onClick={handleLogoutAll}>
+              <span className="mr-2 flex items-center"><FcExport size={16} /></span> Log out all devices
+            </Button>
+          )}
+        </div>
+        <div className="space-y-4 mt-4">
+          {sessions.map(session => (
+            <div key={session.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
+              <div className="flex items-center space-x-4">
+                {session.type === 'desktop' ? <FcDisplay size={24} /> : <FcPhoneAndroid size={24} />}
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium text-gray-900">{session.device}</span>
+                    {session.isCurrent && <Badge variant="success">Current Session</Badge>}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {session.browser} • {session.location} • {session.ip}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">Last active: {session.lastActive}</div>
+                </div>
+              </div>
+
+              {/* Logout Logic */}
+              {!session.isCurrent && canManageSessions && (
+                <Button variant="ghost" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleLogout(session.id)}>
+                  <span className="mr-2 flex items-center"><FcExport size={16} /></span> Logout
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {isSuperAdmin && (
+        <>
+          {/* Data Retention Section - Visible ONLY to Super Admin */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-2">
+              <FcDatabase size={24} />
+              <h3 className="text-lg font-medium text-gray-900 leading-6">Data Retention Policy</h3>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-500 text-sm mb-6 max-w-2xl">
+                Configure how long user data, activity logs, and system backups are retained. Data older than the selected period will be automatically permanently deleted in compliance with GDPR and privacy standards.
+              </p>
+              <div className="max-w-xs">
+                <Select
+                  label="Retention Period"
+                  options={[
+                    { value: '30_days', label: '30 Days' },
+                    { value: '90_days', label: '90 Days' },
+                    { value: '6_months', label: '6 Months' },
+                    { value: '1_year', label: '1 Year' },
+                    { value: '3_years', label: '3 Years' },
+                    { value: 'forever', label: 'Indefinitely' }
+                  ]}
+                  value={retentionPeriod}
+                  onChange={(e) => setRetentionPeriod(e.target.value)}
+                />
+              </div>
+              <div className="mt-4 flex justify-end">
+                <Button variant="secondary" size="sm">Update Policy</Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Export Data Section */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-2">
+              <FcDownload size={24} />
+              <h3 className="text-lg font-medium text-gray-900 leading-6">Export Your Data</h3>
+            </div>
+            <div className="p-6">
+              <div className="bg-[#F0F9FF] rounded-lg p-6 border border-[#BAE6FD]">
+                <p className="text-gray-700 mb-4">Download a copy of all your data including contacts, meeting minutes, and settings.</p>
+                <button className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 hover:border-gray-300 shadow-sm font-medium transition-all text-sm">
+                  <FcDownload size={16} />
+                  Export My Data
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Delete Account Section */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-2">
+              <Trash2 size={24} />
+              <h3 className="text-lg font-medium text-gray-900 leading-6">Delete Account</h3>
+            </div>
+            <div className="p-6">
+              <div className="bg-[#FEF2F2] rounded-lg p-6 border border-[#FCA5A5]">
+                <div className="flex items-start gap-3 mb-2">
+                  <div className="mt-0.5 flex-shrink-0"><FcHighPriority size={24} /></div>
+                  <h4 className="text-base font-bold text-gray-900">Permanently delete your account</h4>
+                </div>
+                <p className="text-gray-600 mb-6 ml-8 text-sm">This action is irreversible. Before proceeding, we recommend exporting your data.</p>
+
+                <div className="flex flex-col sm:flex-row gap-3 ml-8">
+                  <button className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 hover:border-gray-300 shadow-sm font-medium transition-all text-sm">
+                    <FcDownload size={16} />
+                    Export Data First
+                  </button>
+                  <button className="flex items-center gap-2 px-4 py-2.5 bg-[#FEE2E2] border border-[#FCA5A5] rounded-lg text-red-700 hover:bg-[#FECACA] shadow-sm font-medium transition-all text-sm">
+                    <Trash2 size={16} />
+                    Delete My Account
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+export default AdminSection;

@@ -1,0 +1,7 @@
+{
+  "name": "Settings Dashboard",
+  "description": "A professional, role-based settings dashboard with RBAC, secure profile management, billing overview, and referral tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Card, Toggle, Button, Input, TextArea, Select } from '../UIComponents';
-import { FcFeedback, FcComments, FcExport, FcCheckmark as FcSent, FcQuestions, FcDown, FcUp, FcAlarmClock, FcClock, FcHighPriority, FcAbout, FcFlashOn, FcPlus, FcInspection, FcCancel, FcIdea } from 'react-icons/fc';
+import { FcFeedback, FcComments, FcExport, FcCheckmark as FcSent, FcQuestions, FcDown, FcUp, FcAlarmClock, FcClock, FcHighPriority, FcAbout, FcFlashOn, FcPlus, FcInspection, FcCancel, FcIdea, FcCustomerSupport } from 'react-icons/fc';
 import { Pencil, Trash2, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 
@@ -247,13 +247,11 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({ curr
 };
 
 // --- FAQ Item Component ---
-const FAQItem: React.FC<{ question: string; answer: string }> = ({ question, answer }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
+const FAQItem: React.FC<{ question: string; answer: React.ReactNode; isOpen: boolean; onClick: () => void }> = ({ question, answer, isOpen, onClick }) => {
   return (
     <div className="border-b border-gray-100 last:border-0">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={onClick}
         className="flex items-center justify-between w-full py-4 text-left focus:outline-none group"
       >
         <span className={`text-sm font-medium transition-colors ${isOpen ? 'text-blue-600' : 'text-gray-900 group-hover:text-blue-600'}`}>
@@ -281,10 +279,12 @@ export const AboutSection: React.FC = () => {
   const [feedbackForm, setFeedbackForm] = useState({ topic: 'General', message: '' });
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [faqCategory, setFaqCategory] = useState('General');
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
   // --- Chatbot Logic (Moved from NotificationsSection) ---
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; source?: string }[]>([
-    { role: 'assistant', content: "Hello! 👋 How can I help you regarding your settings, billing, or account today?" }
+    { role: 'assistant', content: "Hello! I am your dedicated LeadQ Support Agent. How can I assist you with your account, billing, or technical queries today?" }
   ]);
   const [inputMsg, setInputMsg] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -320,8 +320,8 @@ export const AboutSection: React.FC = () => {
         botResponse = retrieval.text;
         source = retrieval.source;
       } else {
-        botResponse = "I'm not sure about that specific detail. Since I couldn't find a validated answer, I recommend raising a ticket for our human support team.";
-        source = "Fallback";
+        botResponse = "I apologize, but I don't have the specific details for that in my immediate records. To ensure this is resolved correctly, I recommend raising a formal support ticket so our technical team can investigate.";
+        source = "Support Agent";
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: botResponse, source }]);
@@ -380,27 +380,353 @@ export const AboutSection: React.FC = () => {
   };
 
   const faqs = [
+    // --- General ---
     {
-      question: "How do I reset my password?",
-      answer: "You can reset your password by going to the Security tab and clicking on 'Set Password'. If you cannot log in, use the 'Forgot Password' link on the login page."
+      category: 'General',
+      question: "What exactly is LeadQ.ai?",
+      answer: (
+        <div className="space-y-2">
+          <p>LeadQ.ai is an <strong>AI-native sales intelligence platform</strong> designed to automate the manual "shadow work" of sales. We call it the <strong>"Handshake to Inbox" bridge</strong>.</p>
+          <p>It handles everything from:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li>Scanning business cards instantly.</li>
+            <li>Researching prospects in real-time.</li>
+            <li>Capturing meeting notes.</li>
+            <li>Drafting personalized follow-up emails automatically.</li>
+          </ul>
+        </div>
+      )
     },
     {
-      question: "Where can I find my invoices?",
-      answer: "Invoices are available in the Plans & Billing tab under the 'Billing History' section. You can download PDF copies of all past transactions."
+      category: 'General',
+      question: "How is LeadQ.ai different from a standard CRM?",
+      answer: (
+        <div className="space-y-2">
+          <p>A CRM is a <em>system of record</em> (storing data), whereas LeadQ.ai is a <em>system of action</em> (creating data).</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li><strong>CRM:</strong> Records history (what happened).</li>
+            <li><strong>LeadQ.ai:</strong> Drives action. We focus on high-friction moments—like trade shows and discovery calls—to ensure accurate capabilities and instant follow-ups.</li>
+          </ul>
+        </div>
+      )
     },
     {
-      question: "How do I add a new user to my team?",
-      answer: "To add a new user, navigate to the Team Management section (available for Admin roles). Click 'Add Member' and enter their email address to send an invitation."
+      category: 'General',
+      question: "Who is LeadQ.ai designed for?",
+      answer: (
+        <p>
+          LeadQ.ai is built for <strong>B2B sales professionals, account executives, and founders</strong> who spend significant time meeting prospects. It is especially powerful for teams attending conferences, trade shows, and networking events where speed and context are critical.
+        </p>
+      )
     },
     {
-      question: "Can I change my subscription plan?",
-      answer: "Yes, go to Plans & Billing > Pricing Plans. You can upgrade or downgrade your plan at any time. Changes typically take effect immediately."
+      category: 'General',
+      question: "Can I use LeadQ.ai on mobile devices?",
+      answer: (
+        <p>
+          <strong>Yes.</strong> LeadQ.ai is fully optimized for mobile web browsers, allowing you to capture leads and record meetings on the go. A dedicated mobile app for iOS and Android is also on our roadmap for seamless offline access.
+        </p>
+      )
     },
     {
-      question: "What payment methods do you accept?",
-      answer: "We accept all major credit cards (Visa, Mastercard, Amex) and UPI payments. You can manage your payment methods in the Billing Settings tab."
+      category: 'General',
+      question: "Is there a free trial available?",
+      answer: (
+        <p>
+          Yes! We offer a <strong>14-day free trial</strong> with full access to all Pro features, including unlimited business card scans and AI research summaries. No credit card is required to start exploring.
+        </p>
+      )
+    },
+
+
+    // --- Lead Capture ---
+    {
+      category: 'Lead Capture',
+      question: "Can I scan double-sided or non-standard business cards?",
+      answer: (
+        <div className="space-y-2">
+          <p><strong>Yes.</strong> Our <strong>Multi-Image Capture</strong> feature supports real-world scenarios.</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li>Upload up to <strong>five images</strong> per contact.</li>
+            <li>Capture front and back of cards.</li>
+            <li>Scan related brochures or handwritten notes.</li>
+          </ul>
+          <p>Our AI vision engine merges all extracted text into a single, clean contact profile.</p>
+        </div>
+      )
+    },
+    {
+      category: 'Lead Capture',
+      question: "What if someone doesn’t have a business card?",
+      answer: (
+        <div className="space-y-2">
+          <p>LeadQ.ai offers four flexible ways to capture a lead:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li><strong>OCR:</strong> Scan a physical business card.</li>
+            <li><strong>QR Code:</strong> Scan a digital vCard or QR code immediately.</li>
+            <li><strong>NFC:</strong> Tap against NFC-enabled digital digital cards.</li>
+            <li><strong>Manual Entry:</strong> Use our fast, validation-checked form.</li>
+          </ul>
+        </div>
+      )
+    },
+    {
+      category: 'Lead Capture',
+      question: "How do I save scanned contacts to my phone?",
+      answer: (
+        <p>
+          Every contact profile includes a <strong>"Save to Phone"</strong> button. This generates a standard <code>.vcf</code> (vCard) file that opens instantly on iOS or Android, allowing you to add the contact directly to your native address book.
+        </p>
+      )
+    },
+    {
+      category: 'Lead Capture',
+      question: "How does the OCR accuracy handle handwriting?",
+      answer: (
+        <p>
+          Our AI is trained to recognize <strong>handwritten notes</strong> on business cards with high accuracy. While typed text is near-perfect, legible handwriting is typically captured correctly and added to the "Notes" section of the contact profile.
+        </p>
+      )
+    },
+    {
+      category: 'Lead Capture',
+      question: "Can I export my captured leads to a CSV?",
+      answer: (
+        <p>
+          Yes. You can select multiple contacts from your dashboard and choose <strong>Export &gt; CSV</strong>. This file is formatted to be easily imported into Excel, Google Sheets, or any other CRM or marketing tool.
+        </p>
+      )
+    },
+
+    // --- Research ---
+    {
+      category: 'Research',
+      question: "What is the Research Agent and where does it get data?",
+      answer: (
+        <div className="space-y-2">
+          <p>The Research Agent is your autonomous analyst. After a lead is captured, it searches public sources in real-time, including:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li>Company websites</li>
+            <li>LinkedIn profiles</li>
+            <li>Relevant news articles</li>
+            <li>Public business registries</li>
+          </ul>
+          <p>It produces a concise summary of the person and their company so you can be prepared instantly.</p>
+        </div>
+      )
+    },
+    {
+      category: 'Research',
+      question: "How reliable is the AI-generated information?",
+      answer: (
+        <div className="space-y-2">
+          <p>We prioritize transparency. Each research output includes a <strong>Confidence Score</strong>:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li><span className="text-green-600 font-bold">High:</span> Verified across multiple authoritative sources.</li>
+            <li><span className="text-yellow-600 font-bold">Medium:</span> Found in limited sources; worth verifying.</li>
+            <li><span className="text-red-600 font-bold">Low:</span> Limited public data available (flagged as "Limited verified info").</li>
+          </ul>
+        </div>
+      )
+    },
+    {
+      category: 'Research',
+      question: "How long does the research process take?",
+      answer: (
+        <p>
+          Research is typically completed within <strong>30 to 60 seconds</strong> after capturing a lead. You will receive a notification once the intelligence briefing is ready to view.
+        </p>
+      )
+    },
+    {
+      category: 'Research',
+      question: "Can I manually edit the research summary?",
+      answer: (
+        <p>
+          <strong>Yes.</strong> If you have insider knowledge or find more specific details, you can click "Edit" on any profile to manually update the summary, job title, or company details. The AI will respect these manual overrides in future drafts.
+        </p>
+      )
+    },
+    {
+      category: 'Research',
+      question: "Does the Research Agent work for private companies?",
+      answer: (
+        <p>
+          Yes, but the depth of information depends on their online footprint. For private companies, the agent focuses on their website, press releases, and available social media presence to construct the best possible profile.
+        </p>
+      )
+    },
+
+    // --- Meetings ---
+    {
+      category: 'Meetings',
+      question: "Does LeadQ.ai support in-person and virtual meetings?",
+      answer: (
+        <div className="space-y-2">
+          <p>Yes, we support both workflows seamlessly:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li><strong>In-Person (Offline):</strong> Use your phone's microphone to record face-to-face conversations securely.</li>
+            <li><strong>Virtual (Online):</strong> Generate links for Google Meet or Microsoft Teams that automatically record and transcribe the session.</li>
+          </ul>
+        </div>
+      )
+    },
+    {
+      category: 'Meetings',
+      question: "Do I need to record the entire meeting to get a summary?",
+      answer: (
+        <p>
+          No. While audio recordings provide the most detail, you can also enter <strong>Manual Notes</strong> during or after the meeting. The AI will generate a formal Minutes of Meeting (MoM) and extract action items from your typed notes just as effectively.
+        </p>
+      )
+    },
+    {
+      category: 'Meetings',
+      question: "Can I take photos during meetings?",
+      answer: (
+        <div className="space-y-2">
+          <p>Yes. We call these <strong>Memory Anchors</strong>. You can attach:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li>Whiteboard photos</li>
+            <li>Sketches or diagrams</li>
+            <li>Meeting selfies with the client</li>
+          </ul>
+          <p>These are stored with the meeting record and can be referenced in follow-up emails.</p>
+        </div>
+      )
+    },
+    {
+      category: 'Meetings',
+      question: "What languages does the transcription support?",
+      answer: (
+        <p>
+          Currently, LeadQ.ai supports transcription in <strong>English, Spanish, French, and German</strong>. We are actively adding support for more languages to help global sales teams.
+        </p>
+      )
+    },
+    {
+      category: 'Meetings',
+      question: "How long are meeting recordings stored?",
+      answer: (
+        <p>
+          Recordings are stored securely for <strong>90 days</strong> by default, allowing you enough time to review and process them. Transcripts and summaries are stored indefinitely as long as your account is active.
+        </p>
+      )
+    },
+
+    // --- Follow-ups ---
+    {
+      category: 'Follow-ups',
+      question: "How does the AI know what to include in follow-ups?",
+      answer: (
+        <div className="space-y-2">
+          <p>LeadQ.ai analyzes the <strong>meeting context</strong> (transcript or notes) to identify:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li>Key discussion points & pain points.</li>
+            <li>Agreed-upon pricing or timelines.</li>
+            <li>Specific next steps.</li>
+          </ul>
+          <p>It then drafts a personalized email referencing these facts, making it feel human and attentive.</p>
+        </div>
+      )
+    },
+    {
+      category: 'Follow-ups',
+      question: "Can I customize the tone of AI-generated drafts?",
+      answer: (
+        <p>
+          Yes. In <strong>Settings → Prompts</strong>, you can customize the system prompt. For example, you can instruct the AI to be "Concise and direct" or "Warm and conversational," or to always include a link to your calendar.
+        </p>
+      )
+    },
+    {
+      category: 'Follow-ups',
+      question: "Can I schedule emails to be sent later?",
+      answer: (
+        <p>
+          Yes. Once a draft is generated, you can choose to <strong>"Send Now"</strong> or <strong>"Schedule Send"</strong>. Scheduled emails will be queued and sent automatically at your chosen time, optimizing for your prospect's time zone.
+        </p>
+      )
+    },
+    {
+      category: 'Follow-ups',
+      question: "Does LeadQ.ai integrate with my email provider?",
+      answer: (
+        <p>
+          We support integration with <strong>Gmail and Outlook</strong>. Once connected, emails sent from LeadQ.ai will appear in your "Sent" folder, ensuring you have a complete record of communication.
+        </p>
+      )
+    },
+    {
+      category: 'Follow-ups',
+      question: "Can I create multiple templates for different scenarios?",
+      answer: (
+        <p>
+          Yes. You can save custom <strong>Prompt Templates</strong> (e.g., "Initial Outreach," "Proposal Follow-up," "Thank You"). When generating an email, simply select the template that best fits the meeting context.
+        </p>
+      )
+    },
+
+    // --- Security & Admin ---
+    {
+      category: 'Security & Admin',
+      question: "Is my data secure? Can competitors access my leads?",
+      answer: (
+        <div className="space-y-2">
+          <p>Your security is non-negotiable.</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li><strong>Private Tenant:</strong> All leads remain private to your organization.</li>
+            <li><strong>No Shared Training:</strong> We never use your customer data to train shared or global AI models.</li>
+            <li><strong>Encryption:</strong> Data is encrypted at rest and in transit.</li>
+          </ul>
+        </div>
+      )
+    },
+    {
+      category: 'Security & Admin',
+      question: "What is the Corporate Dashboard used for?",
+      answer: (
+        <p>
+          The Corporate Dashboard is for sales leaders. It enables visibility into <strong>team KPIs, follow-up speed, and license management</strong>. It also allows admins to define organization-wide service offerings for consistent messaging.
+        </p>
+      )
+    },
+    {
+      category: 'Security & Admin',
+      question: "Does LeadQ.ai integrate with existing CRMs?",
+      answer: (
+        <div className="space-y-2">
+          <p><strong>Current:</strong> Export contacts via vCard and CSV.</p>
+          <p><strong>Coming Soon:</strong> We are building native, one-click integrations for:</p>
+          <ul className="list-disc pl-5 space-y-1 text-gray-700">
+            <li>HubSpot</li>
+            <li>Salesforce</li>
+            <li>Pipedrive</li>
+          </ul>
+        </div>
+      )
+    },
+    {
+      category: 'Security & Admin',
+      question: "How do I manage team roles and permissions?",
+      answer: (
+        <p>
+          Admins can assign roles such as <strong>"Member"</strong> (standard access) or <strong>"Admin"</strong> (full control). This creates a secure environment where team members can only access their own data, while managers can view team-wide performance.
+        </p>
+      )
+    },
+    {
+      category: 'Security & Admin',
+      question: "Is LeadQ.ai GDPR compliant?",
+      answer: (
+        <p>
+          Yes. We adhere to <strong>GDPR and CCPA</strong> privacy standards. You have full control over your data, including the "Right to be Forgotten," allowing you to permanently delete prospect data from our systems at any time.
+        </p>
+      )
     }
   ];
+
+  const faqCategories = ['General', 'Lead Capture', 'Research', 'Meetings', 'Follow-ups', 'Security & Admin'];
 
   return (
     <div className="space-y-6 relative">
@@ -426,29 +752,60 @@ export const AboutSection: React.FC = () => {
           </button>
         ))}
 
-        {/* Chatbot Button (Action) */}
+        {/* Contact Support Button (Action) */}
         <button
           onClick={() => setIsChatOpen(true)}
           className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-200 transition-all duration-200"
         >
           <FcComments size={18} />
-          <span>Chatbot</span>
+          <span>Contact Support</span>
         </button>
       </div>
 
       {/* Dynamic Content */}
       <Card className="animate-fade-in min-h-[400px]">
         {activeTab === 'faq' && (
-          <div className="max-w-2xl mx-auto py-2">
-            <div className="text-center mb-8">
+          <div className="max-w-3xl mx-auto py-2">
+            <div className="text-center mb-6">
               <h3 className="text-2xl font-bold text-gray-900">Frequently Asked Questions</h3>
-              <p className="text-gray-500 mt-2">Find answers to the most common questions about our platform.</p>
+              <p className="text-gray-500 mt-2">Everything you need to know about the product and billing.</p>
             </div>
-            <div className="space-y-1">
-              {faqs.map((faq, index) => (
-                <FAQItem key={index} question={faq.question} answer={faq.answer} />
+
+            {/* Category Filter Pills */}
+            <div className="flex flex-wrap justify-center gap-2 mb-8">
+              {faqCategories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setFaqCategory(cat)}
+                  className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-200 border ${faqCategory === cat
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                    }`}
+                >
+                  {cat}
+                </button>
               ))}
             </div>
+
+            <div className="space-y-1 min-h-[300px]">
+              {faqs
+                .filter(faq => faq.category === faqCategory)
+                .map((faq, index) => (
+                  <FAQItem
+                    key={index}
+                    question={faq.question}
+                    answer={faq.answer}
+                    isOpen={openFaqIndex === index}
+                    onClick={() => setOpenFaqIndex(openFaqIndex === index ? null : index)}
+                  />
+                ))}
+              {faqs.filter(faq => faq.category === faqCategory).length === 0 && (
+                <div className="text-center text-gray-400 py-10">
+                  No questions in this category yet.
+                </div>
+              )}
+            </div>
+
             <div className="mt-8 p-4 bg-blue-50 rounded-lg text-center">
               <p className="text-sm text-blue-800">Can't find what you're looking for?</p>
               <button onClick={() => setIsChatOpen(true)} className="text-blue-600 font-bold text-sm hover:underline mt-1">Contact Support</button>
@@ -580,14 +937,14 @@ export const AboutSection: React.FC = () => {
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 flex justify-between items-center text-white shrink-0">
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                    <FcComments size={24} />
+                  <div className="w-12 h-12 rounded-full bg-white border-2 border-white/30 flex items-center justify-center shadow-lg">
+                    <FcCustomerSupport size={32} />
                   </div>
-                  <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-400 border-2 border-indigo-600 animate-pulse"></div>
+                  <div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-green-400 border-2 border-indigo-600 animate-pulse"></div>
                 </div>
                 <div>
-                  <h3 className="font-bold text-lg">LeadQ Assistant</h3>
-                  <p className="text-blue-100 text-xs">Always online • Replies instantly</p>
+                  <h3 className="font-bold text-lg">LeadQ Customer Support</h3>
+                  <p className="text-blue-100 text-xs">Online • Average response: &lt; 1 min</p>
                 </div>
               </div>
               <button
@@ -644,7 +1001,7 @@ export const AboutSection: React.FC = () => {
                   <Send size={20} className="text-white ml-1" />
                 </button>
               </div>
-              <p className="text-center text-xs text-gray-400 mt-3">Powered by LeadQ AI Support</p>
+              <p className="text-center text-xs text-gray-400 mt-3">Connected to LeadQ Support System</p>
             </div>
           </div>
         </div>

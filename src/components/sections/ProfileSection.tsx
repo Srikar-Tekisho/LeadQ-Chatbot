@@ -546,73 +546,29 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
   }, []);
 
 
-  const handleCreateProfile = async () => {
-    // Basic validation check
-    if (!userProfile.fullName || !userProfile.email) {
-      addToast("Please fill in required Personal Information (Name, Email)", "error");
-      return;
-    }
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No authenticated user");
-
-      // 1. Upsert Profile
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: user.id,
-        full_name: userProfile.fullName,
-        email: userProfile.email,
-        phone: userProfile.phone,
-        location: userProfile.location,
-        language: userProfile.language,
-        tone: userProfile.tone,
-        updated_at: new Date().toISOString()
-      });
-
-      if (profileError) throw profileError;
-
-      // 2. Insert Company (if data exists)
-      if (companyProfile.name) {
-        const { error: companyError } = await supabase.from('companies').insert({
-          owner_id: user.id,
-          name: companyProfile.name,
-          website: companyProfile.website,
-          address: companyProfile.address,
-          intro: companyProfile.intro
-        });
-        if (companyError) throw companyError;
-      }
-
-      setHasProfile(true);
-      addToast("Profile created successfully!", "success");
-
-    } catch (err: any) {
-      console.error("Error creating profile:", err);
-      addToast(err.message || "Failed to create profile", "error");
-    }
-  };
-
   const handleUpdateUser = async (data: UserProfile) => {
     setUserProfile(data);
-    if (!hasProfile) return; // Don't sync if strictly in creation mode/not saved yet
 
-    // Debounce or save immediately? For now save immediately.
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { error } = await supabase.from('profiles').update({
+      const { error } = await supabase.from('profiles').upsert({
+        id: user.id,
         full_name: data.fullName,
         email: data.email,
         phone: data.phone,
         location: data.location,
         language: data.language,
         tone: data.tone,
-      }).eq('id', user.id);
+        updated_at: new Date().toISOString()
+      });
 
       if (error) {
         console.error("Error updating profile:", error);
         addToast("Failed to save changes", "error");
+      } else {
+        setHasProfile(true);
       }
     } catch (err) {
       console.error("Error updating profile:", err);
@@ -621,17 +577,11 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
 
   const handleUpdateCompany = async (data: CompanyProfile) => {
     setCompanyProfile(data);
-    if (!hasProfile) return;
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Check if company exists first, or just upsert based on owner_id?
-      // Companies has a random ID key, but we look up by owner_id.
-      // Upsert is tricky without the primary key. Let's try update first.
-
-      // For simple 1:1, we can do this:
       const { data: existing } = await supabase.from('companies').select('id').eq('owner_id', user.id).single();
 
       if (existing) {
@@ -643,7 +593,6 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
         }).eq('id', existing.id);
         if (error) throw error;
       } else {
-        // Create if missing (rare case in edit mode)
         const { error } = await supabase.from('companies').insert({
           owner_id: user.id,
           name: data.name,
@@ -689,40 +638,6 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center text-gray-400">Loading profile data...</div>;
-  }
-
-  if (!hasProfile) {
-    return (
-      <div className="max-w-3xl mx-auto pt-10 pb-20 animate-fade-in text-left">
-        <div className="mb-10 text-center">
-          <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">Welcome to Settings</h1>
-          <p className="text-lg text-gray-500 mt-3 max-w-xl mx-auto">Let's set up your profile and company details to get you started.</p>
-        </div>
-
-        <div className="space-y-8">
-          <PersonalProfile
-            data={userProfile}
-            setData={handleUpdateUser}
-            userRole={userRole}
-            forceEditMode={true}
-          />
-
-          {canViewCompany && (
-            <CompanyProfilePanel
-              data={companyProfile}
-              setData={handleUpdateCompany}
-              forceEditMode={true}
-            />
-          )}
-
-          <div className="flex justify-end pt-4">
-            <Button onClick={handleCreateProfile} variant="primary" size="lg" className="w-full md:w-auto px-10 shadow-lg text-lg">
-              Create Profile
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (

@@ -49,12 +49,39 @@ const BillingPricingSection: React.FC<Props> = ({ userRole }) => {
     }, [activeTab]);
 
     // Payment Methods State
-    const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
-        { id: '1', type: 'card', title: 'Visa ending in 4242', subtitle: 'Expires 12/2028', isPrimary: true, expiry: '12/2028', brand: 'visa' },
-        { id: '2', type: 'upi', title: 'alex.morgan@oksbi', subtitle: 'UPI', isPrimary: false }
-    ]);
+    const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
     const [showAddModal, setShowAddModal] = useState(false);
     const [addMethodType, setAddMethodType] = useState<'card' | 'upi'>('card');
+
+    // Fetch Payment Methods
+    React.useEffect(() => {
+        const fetchPaymentMethods = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data, error } = await supabase.from('payment_methods').select('*').eq('user_id', user.id);
+            if (data && data.length > 0) {
+                const mapped = data.map((pm: any) => ({
+                    id: pm.id,
+                    type: pm.brand === 'upi' ? 'upi' : 'card', // Simplification
+                    title: pm.brand === 'upi' ? pm.last_4 : `Card ending in ${pm.last_4}`,
+                    subtitle: pm.expiry || 'UPI',
+                    isPrimary: pm.is_primary,
+                    brand: pm.brand,
+                    expiry: pm.expiry
+                }));
+                setPaymentMethods(mapped);
+            } else {
+                // Fallback or empty
+                setPaymentMethods([
+                    { id: '1', type: 'card', title: 'Visa ending in 4242 (Demo)', subtitle: 'Expires 12/2028', isPrimary: true, expiry: '12/2028', brand: 'visa' }
+                ]);
+            }
+        };
+        if (activeTab === 'billing') {
+            fetchPaymentMethods();
+        }
+    }, [activeTab]);
 
     return (
         <div className="space-y-6">

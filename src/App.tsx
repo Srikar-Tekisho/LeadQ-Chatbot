@@ -1,68 +1,87 @@
-import React, { useState } from 'react';
-import Sidebar from './components/Sidebar';
-import ProfileSection from './components/sections/ProfileSection';
-import SecuritySection from './components/sections/SecuritySection';
-import ReferralSection from './components/sections/ReferralSection';
-import BillingPricingSection from './components/sections/BillingPricingSection';
-import { NotificationsSection, AboutSection } from './components/sections/NotificationsAboutSection';
-import AdminSection from './components/sections/AdminSection';
-import CompanyAboutSection from './components/sections/CompanyAboutSection';
-import { UserRole, Tab } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import MainDashboard from './components/MainDashboard';
+import SettingsDashboard from './components/SettingsDashboard';
+import Chatbot from './components/Chatbot';
+import Login from './components/Login';
+import FeedbackPopup from './components/FeedbackPopup';
+import { supabase } from './lib/supabaseClient';
+import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<Tab>(Tab.PROFILE);
-  const [userRole, setUserRole] = useState<UserRole>(UserRole.SUPER_ADMIN);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const hasTriggeredExitIntent = useRef(false);
 
-  // Render Logic
-  const renderContent = () => {
-    switch (activeTab) {
-      case Tab.PROFILE:
-        return <ProfileSection userRole={userRole} />;
-      case Tab.NOTIFICATIONS:
-        return <NotificationsSection />;
-      case Tab.SECURITY:
-        return <SecuritySection userRole={userRole} />;
-      case Tab.PLANS_BILLING:
-        return <BillingPricingSection userRole={userRole} />;
-      case Tab.ADMIN:
-        return <AdminSection userRole={userRole} />;
-      case Tab.REFERRAL:
-        return <ReferralSection />;
-      case Tab.HELP:
-        return <AboutSection />;
-      case Tab.ABOUT:
-        return <CompanyAboutSection />;
-      default:
-        return <ProfileSection userRole={userRole} />;
-    }
+  useEffect(() => {
+    // Check active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    // Listen for changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Exit Intent Logic
+  useEffect(() => {
+    const handleMouseLeave = (e: MouseEvent) => {
+      // Trigger if mouse leaves top of viewport and hasn't triggered before
+      if (e.clientY <= 0 && !hasTriggeredExitIntent.current && session) {
+        hasTriggeredExitIntent.current = true;
+        setShowFeedback(true);
+      }
+    };
+
+    document.addEventListener('mouseleave', handleMouseLeave);
+    return () => document.removeEventListener('mouseleave', handleMouseLeave);
+  }, [session]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setShowFeedback(false);
+    hasTriggeredExitIntent.current = false; // Reset for next login
   };
 
+  if (loading) {
+    return <div className="flex h-screen items-center justify-center bg-gray-50 animate-pulse text-gray-400">Loading LeadQ AI...</div>;
+  }
+
+  if (!session) {
+    return <Login />;
+  }
+
   return (
-    <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        userRole={userRole}
-        setRole={setUserRole}
-      />
+    <BrowserRouter>
+      {/* Global Feedback Popup - Triggered on Logout OR Exit Intent */}
+      {showFeedback && (
+        <FeedbackPopup
+          onClose={() => setShowFeedback(false)}
+          onConfirmExit={handleLogout}
+        />
+      )}
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8 sticky top-0 z-10">
-          <h1 className="text-2xl font-bold text-gray-900">{activeTab}</h1>
-          <div className="flex items-center space-x-4">
-            {/* Avatar component removed */}
-          </div>
-        </header>
+      {/* Global Chatbot Agent - Always Available */}
+      <Chatbot />
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-5xl mx-auto pb-12">
-            {renderContent()}
-          </div>
-        </div>
-      </main>
-    </div>
+      <Routes>
+        <Route path="/" element={<MainDashboard />} />
+        <Route
+          path="/settings"
+          element={<SettingsDashboard onSignOut={() => setShowFeedback(true)} />}
+        />
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 };
 

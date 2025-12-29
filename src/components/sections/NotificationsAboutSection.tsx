@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Toggle, Button, Input, TextArea, Select } from '../UIComponents';
 import { FcFeedback, FcComments, FcExport, FcCheckmark as FcSent, FcQuestions, FcDown, FcUp, FcAlarmClock, FcClock, FcHighPriority, FcAbout, FcFlashOn, FcPlus, FcInspection, FcCancel, FcIdea, FcCustomerSupport } from 'react-icons/fc';
-import { Pencil, Trash2, Send, X } from 'lucide-react';
+import { Pencil, Trash2, Send, X, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 
 // --- Local Knowledge Base (Simulated RAG Source) ---
@@ -35,6 +35,7 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({ curr
   // Meeting Timers State
   const [timers, setTimers] = useState<number[]>([15, 60]);
   const [newTimerVal, setNewTimerVal] = useState('');
+  const [editingTimer, setEditingTimer] = useState<{ original: number, current: string } | null>(null);
 
   const handleAddTimer = () => {
     const val = parseInt(newTimerVal);
@@ -46,6 +47,26 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({ curr
 
   const removeTimer = (val: number) => {
     setTimers(timers.filter(t => t !== val));
+  };
+
+  const startEditing = (val: number) => {
+    setEditingTimer({ original: val, current: val.toString() });
+  };
+
+  const saveEdit = () => {
+    if (!editingTimer) return;
+    const val = parseInt(editingTimer.current);
+    if (!isNaN(val) && val > 0) {
+      if (timers.includes(val) && val !== editingTimer.original) {
+        alert("Timer already exists");
+        return;
+      }
+      const newTimers = timers.filter(t => t !== editingTimer.original);
+      newTimers.push(val);
+      newTimers.sort((a, b) => a - b);
+      setTimers(newTimers);
+      setEditingTimer(null);
+    }
   };
 
   // Fetch Settings on Mount
@@ -190,21 +211,47 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({ curr
         <div className="space-y-3 mt-2">
           {timers.map((time) => (
             <div key={time} className="group flex items-center justify-between p-4 bg-blue-50/50 border border-blue-100 rounded-lg hover:bg-blue-50 transition-colors">
-              <span className="text-sm font-semibold text-blue-900">
-                {time} minutes before meeting
-              </span>
-              <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                {/* Note: Edit functionality is tricky for simple numbers, usually you delete and re-add, but we will show the icon as requested */}
-                <button className="p-1.5 text-blue-400 hover:text-blue-600 transition-colors" title="Edit">
-                  <Pencil size={16} />
-                </button>
-                <button
-                  onClick={() => removeTimer(time)}
-                  className="p-1.5 text-red-400 hover:text-red-600 transition-colors"
-                  title="Delete"
-                >
-                  <Trash2 size={16} />
-                </button>
+              {editingTimer?.original === time ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    type="number"
+                    value={editingTimer.current}
+                    onChange={(e) => setEditingTimer({ ...editingTimer, current: e.target.value })}
+                    className="w-20 bg-white border border-blue-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    autoFocus
+                  />
+                  <span className="text-sm text-blue-900">minutes before meeting</span>
+                </div>
+              ) : (
+                <span className="text-sm font-semibold text-blue-900">
+                  {time} minutes before meeting
+                </span>
+              )}
+
+              <div className={`flex items-center space-x-2 transition-opacity ${editingTimer?.original === time ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                {editingTimer?.original === time ? (
+                  <>
+                    <button onClick={saveEdit} className="p-1.5 text-green-600 hover:text-green-700 transition-colors" title="Save">
+                      <Check size={16} />
+                    </button>
+                    <button onClick={() => setEditingTimer(null)} className="p-1.5 text-gray-500 hover:text-gray-700 transition-colors" title="Cancel">
+                      <X size={16} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEditing(time)} className="p-1.5 text-blue-400 hover:text-blue-600 transition-colors" title="Edit">
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => removeTimer(time)}
+                      className="p-1.5 text-red-400 hover:text-red-600 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -274,7 +321,7 @@ const FAQItem: React.FC<{ question: string; answer: React.ReactNode; isOpen: boo
 
 // --- About Section (Help & Support) ---
 export const AboutSection: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'contact' | 'email' | 'faq' | 'feedback'>('faq');
+  const [activeTab, setActiveTab] = useState<'contact' | 'email' | 'faq'>('faq');
   const [supportForm, setSupportForm] = useState({ category: 'Technical', priority: 'Medium', subject: '', desc: '' });
   const [feedbackForm, setFeedbackForm] = useState({ topic: 'General', message: '' });
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -737,7 +784,6 @@ export const AboutSection: React.FC = () => {
           { id: 'faq', label: 'FAQs', icon: <FcQuestions size={18} /> },
           { id: 'contact', label: 'Raise a Ticket', icon: <FcInspection size={18} /> },
           { id: 'email', label: 'Email Support', icon: <FcFeedback size={18} /> },
-          { id: 'feedback', label: 'Feedback', icon: <FcIdea size={18} /> },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -752,14 +798,6 @@ export const AboutSection: React.FC = () => {
           </button>
         ))}
 
-        {/* Contact Support Button (Action) */}
-        <button
-          onClick={() => setIsChatOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-200 transition-all duration-200"
-        >
-          <FcComments size={18} />
-          <span>Contact Support</span>
-        </button>
       </div>
 
       {/* Dynamic Content */}
@@ -922,17 +960,11 @@ export const AboutSection: React.FC = () => {
         )}
       </Card>
 
-      {/* Chatbot Modal Overlay */}
+      {/* Chatbot Bottom Right Widget */}
       {isChatOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setIsChatOpen(false)}
-          ></div>
-
-          {/* Modal Window */}
-          <div className="relative bg-white w-full max-w-lg h-[650px] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in-up transform scale-100 transition-all">
+        <div className="fixed bottom-6 right-6 z-50 flex items-end justify-end">
+          {/* Widget Window */}
+          <div className="bg-white w-[380px] h-[600px] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in-up border border-gray-100 transition-all transform origin-bottom-right">
             {/* Header */}
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 flex justify-between items-center text-white shrink-0">
               <div className="flex items-center gap-4">

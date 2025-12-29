@@ -9,13 +9,14 @@ import { useToast } from '../ToastContext';
 // --- Subcomponent: Personal Profile ---
 interface PersonalProfileProps {
   data: UserProfile;
-  setData: (data: UserProfile) => void;
+  setData: (data: UserProfile) => Promise<void>;
   userRole: UserRole;
   forceEditMode?: boolean;
 }
 
 const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRole, forceEditMode = false }) => {
   const [isEditing, setIsEditing] = useState(forceEditMode);
+  const [isSaving, setIsSaving] = useState(false);
   const { addToast } = useToast();
 
   // Avatar State
@@ -63,17 +64,24 @@ const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRo
     return isValid;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (validateForm()) {
-      const first = splitNames.firstName.trim();
-      const last = splitNames.lastName.trim();
-      const newFullName = last ? `${first} ${last}` : first;
+      setIsSaving(true);
+      try {
+        const first = splitNames.firstName.trim();
+        const last = splitNames.lastName.trim();
+        const newFullName = last ? `${first} ${last}` : first;
 
-      const updatedData = { ...data, fullName: newFullName };
-      setData(updatedData);
-      setIsEditing(false);
-      setErrors({});
-      addToast("Personal profile updated successfully", "success");
+        const updatedData = { ...data, fullName: newFullName };
+        // Call parent handler which is async
+        await setData(updatedData);
+        setIsEditing(false);
+        setErrors({});
+      } catch (e) {
+        console.error("Save failed", e);
+      } finally {
+        setIsSaving(false);
+      }
     } else {
       addToast("Please fix the errors in the form", "error");
     }
@@ -153,7 +161,9 @@ const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRo
           ) : (
             <div className="flex space-x-2">
               <Button onClick={handleCancel} variant="ghost" size="sm">Cancel</Button>
-              <Button onClick={handleSave} variant="primary" size="sm">Save</Button>
+              <Button onClick={handleSave} variant="primary" size="sm" disabled={isSaving}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
             </div>
           ))}
         </div>
@@ -307,7 +317,7 @@ const PersonalProfile: React.FC<PersonalProfileProps> = ({ data, setData, userRo
 // --- Subcomponent: Company Profile Panel ---
 interface CompanyProfileProps {
   data: CompanyProfile;
-  setData: (data: CompanyProfile) => void;
+  setData: (data: CompanyProfile) => Promise<void>;
   forceEditMode?: boolean;
 }
 
@@ -349,12 +359,21 @@ const CompanyProfilePanel: React.FC<CompanyProfileProps> = ({ data, setData, for
     return nameValid && websiteValid;
   };
 
-  const handleSave = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
     if (isFormValid()) {
-      setData(data);
-      setIsEditing(false);
-      setErrors({});
-      addToast("Company profile saved", "success");
+      setIsSaving(true);
+      try {
+        await setData(data);
+        setIsEditing(false);
+        setErrors({});
+        addToast("Company profile saved", "success");
+      } catch (e) {
+        // Error handled in parent
+      } finally {
+        setIsSaving(false);
+      }
     } else {
       addToast("Please fill in all required fields", "error");
     }
@@ -378,9 +397,9 @@ const CompanyProfilePanel: React.FC<CompanyProfileProps> = ({ data, setData, for
                 onClick={handleSave}
                 variant="primary"
                 size="sm"
-                disabled={!isFormValid()}
+                disabled={!isFormValid() || isSaving}
               >
-                Save
+                {isSaving ? 'Saving...' : 'Save'}
               </Button>
             </div>
           ))}
@@ -464,9 +483,7 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
     fullName: '',
     email: '',
     phone: '',
-    location: '',
-    language: 'English',
-    tone: 'Professional'
+    location: ''
   });
 
   const [companyProfile, setCompanyProfile] = useState<CompanyProfile>({
@@ -503,13 +520,14 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
         }
 
         if (profile) {
+          // Map DB keys (first_name, last_name) to frontend (fullName)
+          const dbFullName = profile.full_name || (profile.first_name && profile.last_name ? `${profile.first_name} ${profile.last_name}` : profile.first_name || '');
+
           setUserProfile({
-            fullName: profile.full_name || '',
+            fullName: dbFullName || '',
             email: profile.email || user.email || '',
             phone: profile.phone || '',
-            location: profile.location || '',
-            language: profile.language || 'English',
-            tone: profile.tone || 'Professional'
+            location: profile.location || ''
           });
           setHasProfile(true);
 
@@ -553,25 +571,30 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Split name for DB
+      const nameParts = data.fullName.trim().split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+
       const { error } = await supabase.from('profiles').upsert({
         id: user.id,
+        // Reverting to full_name as first_name/last_name columns don't exist
         full_name: data.fullName,
+        // first_name: firstName,
+        // last_name: lastName,
         email: data.email,
         phone: data.phone,
         location: data.location,
-        language: data.language,
-        tone: data.tone,
         updated_at: new Date().toISOString()
       });
 
-      if (error) {
-        console.error("Error updating profile:", error);
-        addToast("Failed to save changes", "error");
-      } else {
-        setHasProfile(true);
-      }
-    } catch (err) {
+      if (error) throw error;
+
+      setHasProfile(true);
+      addToast("Personal profile updated successfully", "success");
+    } catch (err: any) {
       console.error("Error updating profile:", err);
+      addToast(`Failed to save changes: ${err.message || 'Unknown error'}`, "error");
     }
   };
 
@@ -603,9 +626,10 @@ const ProfileSection: React.FC<Props> = ({ initialData, userRole }) => {
         if (error) throw error;
       }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error updating company:", err);
-      addToast("Failed to save company changes", "error");
+      // Show the actual error message or a fallback
+      addToast(`Failed to save company changes: ${err.message || 'Unknown error'}`, "error");
     }
   };
 

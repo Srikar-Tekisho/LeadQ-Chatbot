@@ -20,8 +20,6 @@ export interface UserProfile {
   email: string;
   phone: string;
   location: string;
-  language: string;
-  tone: string;
 }
 
 export interface CompanyProfile {

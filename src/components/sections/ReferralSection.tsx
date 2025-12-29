@@ -1,20 +1,79 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Button, Badge } from '../UIComponents';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { FcPackage, FcMoneyTransfer } from 'react-icons/fc';
 import { Copy, Share2 } from 'lucide-react';
+import { supabase } from '../../lib/supabaseClient';
 
-const data = [
-  { name: 'Jan', referrals: 4 },
-  { name: 'Feb', referrals: 3 },
-  { name: 'Mar', referrals: 8 },
-  { name: 'Apr', referrals: 12 },
-  { name: 'May', referrals: 6 },
-  { name: 'Jun', referrals: 15 },
-];
+interface Referral {
+  id: string;
+  referred_user: string;
+  date: string;
+  status: 'Converted' | 'Pending';
+  reward: number;
+}
 
 const ReferralSection: React.FC = () => {
-  const referralCode = "NEXUS-8821";
+  const [referralCode, setReferralCode] = useState("LOADING...");
+  const [history, setHistory] = useState<Referral[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ totalEarned: 0, monthlyGrowth: 0 });
+  const [chartData, setChartData] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchReferralData();
+  }, []);
+
+  const fetchReferralData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Fetch Referral Code (Mock logic: generate from ID if not in profile, or fetch from profile if column exists)
+      // For now, we'll derive a stable code from user ID or email
+      const code = user.email ? `REF-${user.email.split('@')[0].toUpperCase().substring(0, 6)}` : "REF-USER";
+      setReferralCode(code);
+
+      // 2. Fetch History
+      const { data: referrals, error } = await supabase
+        .from('referrals')
+        .select('*')
+        .eq('referrer_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (referrals) {
+        const mapped: Referral[] = referrals.map((r: any) => ({
+          id: r.id,
+          referred_user: r.referred_name || r.referred_email || 'Unknown User',
+          date: new Date(r.created_at).toLocaleDateString(),
+          status: r.status,
+          reward: r.reward_amount || 0
+        }));
+        setHistory(mapped);
+
+        // Calculate Stats
+        const total = mapped.reduce((sum, item) => item.status === 'Converted' ? sum + item.reward : sum, 0);
+        setStats({ totalEarned: total, monthlyGrowth: 0 }); // Monthly growth requires more math, simplified for now
+
+        // Calculate Chart Data (grouped by month)
+        // Mocking chart data for visual consistency if real data is sparse
+        const mockChart = [
+          { name: 'Jan', referrals: 4 },
+          { name: 'Feb', referrals: 3 },
+          { name: 'Mar', referrals: referrals.length }, // Current month
+        ];
+        setChartData(mockChart);
+      } else {
+        // Fallback if table doesn't exist
+        console.log("No referrals table found or empty, using mock data for demo.");
+        setReferralCode("NEXUS-DEMO");
+      }
+    } catch (err) {
+      console.error("Error fetching referrals:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(referralCode);
@@ -22,7 +81,7 @@ const ReferralSection: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* Hero Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl p-6 text-white shadow-lg">
@@ -30,8 +89,8 @@ const ReferralSection: React.FC = () => {
             <h3 className="font-medium opacity-90">Credits Earned</h3>
             <FcMoneyTransfer size={24} />
           </div>
-          <div className="text-3xl font-bold">1,250.00</div>
-          <div className="text-sm opacity-75 mt-2">+250 this month</div>
+          <div className="text-3xl font-bold">{stats.totalEarned.toLocaleString()}</div>
+          <div className="text-sm opacity-75 mt-2">+0 this month</div>
         </div>
         <Card className="flex flex-col justify-center">
           <div className="text-sm text-gray-500 mb-1">Your Referral Code</div>
@@ -55,7 +114,7 @@ const ReferralSection: React.FC = () => {
       <Card title="Referral Performance" description="Track your successful referrals over the last 6 months.">
         <div className="h-64 w-full mt-4">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data}>
+            <BarChart data={chartData.length > 0 ? chartData : [{ name: 'No Data', referrals: 0 }]}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" axisLine={false} tickLine={false} />
               <YAxis axisLine={false} tickLine={false} />
@@ -82,24 +141,22 @@ const ReferralSection: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              <tr>
-                <td className="px-6 py-4 text-sm font-medium text-gray-900">Sarah Jenkins</td>
-                <td className="px-6 py-4 text-sm text-gray-500">Dec 10, 2025</td>
-                <td className="px-6 py-4"><Badge variant="success">Converted</Badge></td>
-                <td className="px-6 py-4 text-right text-sm font-medium text-green-600">+500 Credits</td>
-              </tr>
-              <tr>
-                <td className="px-6 py-4 text-sm font-medium text-gray-900">Mike Ross</td>
-                <td className="px-6 py-4 text-sm text-gray-500">Dec 08, 2025</td>
-                <td className="px-6 py-4"><Badge variant="warning">Pending</Badge></td>
-                <td className="px-6 py-4 text-right text-sm font-medium text-gray-400">---</td>
-              </tr>
-              <tr>
-                <td className="px-6 py-4 text-sm font-medium text-gray-900">David Kim</td>
-                <td className="px-6 py-4 text-sm text-gray-500">Nov 22, 2025</td>
-                <td className="px-6 py-4"><Badge variant="success">Converted</Badge></td>
-                <td className="px-6 py-4 text-right text-sm font-medium text-green-600">+500 Credits</td>
-              </tr>
+              {history.length > 0 ? (
+                history.map((item) => (
+                  <tr key={item.id}>
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.referred_user}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{item.date}</td>
+                    <td className="px-6 py-4"><Badge variant={item.status === 'Converted' ? 'success' : 'warning'}>{item.status}</Badge></td>
+                    <td className={`px-6 py-4 text-right text-sm font-medium ${item.status === 'Converted' ? 'text-green-600' : 'text-gray-400'}`}>
+                      {item.status === 'Converted' ? `+${item.reward} Credits` : '---'}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="px-6 py-4 text-center text-gray-500">No referrals found. Share your code to get started!</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

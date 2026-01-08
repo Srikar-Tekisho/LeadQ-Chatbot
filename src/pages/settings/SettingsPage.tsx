@@ -32,28 +32,16 @@ const SettingsPage: React.FC = () => {
             <div className="fixed top-0 left-0 right-0 bg-gradient-to-r from-emerald-500 to-teal-600 text-white p-3 z-50 flex items-center justify-between shadow-lg">
               <div className="flex items-center gap-2">
                 <span className="font-bold">⚙️ SETTINGS MODULE</span>
-                <span className="text-sm opacity-75">| Port 3003 | Includes Feedback & Chatbot</span>
+                <span className="text-sm opacity-75">| Includes Feedback & Chatbot</span>
               </div>
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setShowFeedback(true)}
-                  className="px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-4 py-1.5 bg-white text-emerald-600 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors flex items-center gap-2"
                 >
                   <MessageSquare size={16} />
-                  Test Feedback
+                  Leave Feedback
                 </button>
-                <a
-                  href="http://localhost:3001/onboarding.html"
-                  className="px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-colors"
-                >
-                  Onboarding :3001
-                </a>
-                <a
-                  href="http://localhost:3002/dashboard.html"
-                  className="px-4 py-1.5 bg-white text-emerald-600 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
-                >
-                  Dashboard :3002
-                </a>
               </div>
             </div>
 
@@ -67,9 +55,9 @@ const SettingsPage: React.FC = () => {
 
             {/* Feedback Popup */}
             {showFeedback && (
-              <FeedbackPopup 
-                onClose={handleFeedbackClose} 
-                onConfirmExit={handleConfirmExit} 
+              <FeedbackPopup
+                onClose={handleFeedbackClose}
+                onConfirmExit={handleConfirmExit}
               />
             )}
           </div>

@@ -48,10 +48,11 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string;
 }
 
-export const Input: React.FC<InputProps> = ({ label, error, className = "", disabled, ...props }) => (
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(({ label, error, className = "", disabled, ...props }, ref) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
     <input
+      ref={ref}
       disabled={disabled}
       className={`block w-full rounded-md shadow-sm sm:text-sm transition-colors 
         ${disabled ? 'bg-gray-50 text-gray-500 border-gray-200 cursor-default' : 'bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500'} 
@@ -61,7 +62,9 @@ export const Input: React.FC<InputProps> = ({ label, error, className = "", disa
     />
     {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
   </div>
-);
+));
+
+Input.displayName = 'Input';
 
 // --- Text Area ---
 interface TextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {

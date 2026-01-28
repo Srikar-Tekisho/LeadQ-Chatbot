@@ -1,6 +1,7 @@
+import ReactMarkdown from 'react-markdown';
 import React, { useState, useEffect, useRef } from 'react';
 import { FcCustomerSupport, FcFlashOn } from 'react-icons/fc';
-import { Send, X, Minimize2, Mic, MicOff } from 'lucide-react';
+import { Send, X, Minimize2, Mic, MicOff, Copy, ThumbsUp, ThumbsDown, RefreshCw } from 'lucide-react';
 import { Button } from './UIComponents';
 import chatbotIcon from '../assets/chatbot-icon-transparent.webm';
 
@@ -25,7 +26,12 @@ const getTimeBasedGreeting = () => {
 const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
     const [isOpen, setIsOpen] = useState(initialOpen);
     const [messages, setMessages] = useState<Message[]>([
-        { id: '1', role: 'assistant', content: `${getTimeBasedGreeting()} I'm your AI assistant. How can I help you today?` }
+        {
+            id: '1',
+            role: 'assistant',
+            content: `${getTimeBasedGreeting()} I'm your AI assistant. How can I help you today?`,
+            recommendations: ["What is the pricing?", "How does Lead Scoring work?", "Connect my CRM"]
+        }
     ]);
     const [inputValue, setInputValue] = useState("");
     const [isTyping, setIsTyping] = useState(false);
@@ -35,6 +41,15 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<any>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    // Refs for speech recognition to access latest state in closures
+    const inputValueRef = useRef(inputValue);
+    const speechStartIndexRef = useRef(0);
+
+    // Keep ref in sync with state
+    useEffect(() => {
+        inputValueRef.current = inputValue;
+    }, [inputValue]);
 
     // Floating interaction messages
     const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
@@ -78,18 +93,33 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
             recognitionRef.current.interimResults = true;
             recognitionRef.current.lang = 'en-US';
 
+            recognitionRef.current.onstart = () => {
+                // When speech starts, mark the current position as the insertion point
+                // If the user wants to append, we append to the end.
+                // Note: We're assuming appending to the end for simplicity.
+                speechStartIndexRef.current = inputValueRef.current.length;
+            };
+
             recognitionRef.current.onresult = (event: any) => {
                 let interimTranscript = '';
+                let finalTranscript = '';
+
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
-                        setInputValue(prev => prev + event.results[i][0].transcript);
+                        finalTranscript += event.results[i][0].transcript;
                     } else {
                         interimTranscript += event.results[i][0].transcript;
                     }
                 }
-                // Optional: You could show interim results ghosted in the UI
-                if (interimTranscript) {
-                    setInputValue(interimTranscript);
+
+                // Construct the new value: TextBeforeSpeech + (Final OR Interim)
+                // We use the stored start index to ensure we replace the previous interim/final chunk
+                // from the SAME speech session, rather than appending duplicate text.
+                const prefix = inputValueRef.current.substring(0, speechStartIndexRef.current);
+                const currentSpeech = finalTranscript || interimTranscript;
+
+                if (currentSpeech) {
+                    setInputValue(prefix + currentSpeech);
                 }
             };
 
@@ -130,6 +160,10 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
         setInputValue("");
         setIsTyping(true);
 
+        const botMsgId = (Date.now() + 1).toString();
+        let botMessageAdded = false;
+        let accumulatedContent = "";
+
         try {
             const response = await fetch('http://127.0.0.1:5002/chat', {
                 method: 'POST',
@@ -142,30 +176,78 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                 }),
             });
 
-            const data = await response.json();
+            if (!response.body) throw new Error("No response body");
 
-            if (data.sessionId) {
-                setSessionId(data.sessionId);
-                localStorage.setItem('chatSessionId', data.sessionId);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                buffer += chunk;
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || ""; // Keep the last partial line
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const data = JSON.parse(line);
+
+                        if (data.type === "content") {
+                            accumulatedContent += data.chunk;
+
+                            if (!botMessageAdded) {
+                                setIsTyping(false);
+                                botMessageAdded = true;
+                                setMessages(prev => [...prev, {
+                                    id: botMsgId,
+                                    role: 'assistant',
+                                    content: accumulatedContent,
+                                    recommendations: []
+                                }]);
+                            } else {
+                                setMessages(prev => prev.map(msg =>
+                                    msg.id === botMsgId ? { ...msg, content: accumulatedContent } : msg
+                                ));
+                            }
+                        } else if (data.type === "recommendations") {
+                            setMessages(prev => prev.map(msg =>
+                                msg.id === botMsgId ? { ...msg, recommendations: data.data } : msg
+                            ));
+                        } else if (data.type === "meta") {
+                            if (data.sessionId) {
+                                setSessionId(data.sessionId);
+                                localStorage.setItem('chatSessionId', data.sessionId);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Error parsing stream chunk", e);
+                    }
+                }
             }
 
-            const botMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: 'assistant',
-                content: data.response || "I'm having trouble connecting right now. Please try again later.",
-                recommendations: data.recommendations || []
-            };
-            setMessages(prev => [...prev, botMsg]);
+            // Handle edge case where stream finishes but no content was received (shouldn't happen with our backend)
+            if (!botMessageAdded) {
+                setIsTyping(false);
+                setMessages(prev => [...prev, {
+                    id: botMsgId,
+                    role: 'assistant',
+                    content: "I'm having trouble retrieving an answer right now."
+                }]);
+            }
+
         } catch (error) {
             console.error("Chat Error:", error);
+            setIsTyping(false);
             const errorMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
                 content: "I'm sorry, I can't connect to the server (port 5002). Please check if the backend is running and CORS is configured."
             };
             setMessages(prev => [...prev, errorMsg]);
-        } finally {
-            setIsTyping(false);
         }
     };
 
@@ -178,6 +260,12 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
 
     return (
         <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+            <style>{`
+                .prose ul { list-style-type: disc; padding-left: 1.5em; margin-top: 0.5em; margin-bottom: 0.5em; }
+                .prose ol { list-style-type: decimal; padding-left: 1.5em; margin-top: 0.5em; margin-bottom: 0.5em; }
+                .prose strong { font-weight: 600; color: #111827; }
+                .prose p { margin-top: 0.5em; margin-bottom: 0.5em; }
+            `}</style>
             {/* Chat Window */}
             {isOpen && (
                 <div className="mb-4 w-[350px] md:w-[400px] h-[500px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden animate-fade-in-up origin-bottom-right">
@@ -222,7 +310,45 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                                         ? 'bg-indigo-600 text-white rounded-tr-sm'
                                         : 'bg-white text-gray-800 border border-gray-100 rounded-tl-sm'
                                         }`}>
-                                        {msg.content}
+                                        {msg.role === 'assistant' ? (
+                                            <div className="prose prose-sm prose-indigo max-w-none text-gray-800">
+                                                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                            </div>
+                                        ) : (
+                                            <div className="text-white">
+                                                {msg.content}
+                                            </div>
+                                        )}
+                                        {msg.role === 'assistant' && (
+                                            <div className="flex items-center gap-3 mt-3 pt-2 border-t border-gray-100">
+                                                <button
+                                                    onClick={() => navigator.clipboard.writeText(msg.content)}
+                                                    className="text-gray-400 hover:text-indigo-600 transition-colors"
+                                                    title="Copy response"
+                                                >
+                                                    <Copy size={14} />
+                                                </button>
+                                                <button
+                                                    className="text-gray-400 hover:text-green-500 transition-colors"
+                                                    title="Helpful"
+                                                >
+                                                    <ThumbsUp size={14} />
+                                                </button>
+                                                <button
+                                                    className="text-gray-400 hover:text-red-500 transition-colors"
+                                                    title="Not helpful"
+                                                >
+                                                    <ThumbsDown size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleSend(messages[parseInt(msg.id) - 2]?.content)} // naive retry logic
+                                                    className="text-gray-400 hover:text-indigo-600 transition-colors"
+                                                    title="Regenerate response"
+                                                >
+                                                    <RefreshCw size={14} />
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 {/* Recommendations Chips */}
@@ -254,45 +380,41 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                     </div>
 
                     {/* Input Area */}
-                    <div className="p-3 bg-white border-t border-gray-100">
-                        <div className="flex items-end gap-2 bg-gray-100 rounded-xl p-2 border border-transparent focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-500 transition-all shadow-inner">
-                            <textarea
-                                ref={textareaRef}
+                    <div className="p-4 bg-white/80 backdrop-blur-sm border-t border-gray-100">
+                        <div className="flex items-center gap-2 bg-gray-50 rounded-full py-1.5 px-4 h-12 border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all shadow-sm focus-within:shadow-md">
+                            <input
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={handleKeyPress}
-                                rows={1}
-                                placeholder={isListening ? "Listening..." : "Ask for help..."}
-                                className={`w-full bg-transparent border-none focus:ring-0 resize-none py-2 px-1 text-sm max-h-32 overflow-y-auto ${isListening ? 'placeholder-indigo-500 animate-pulse' : ''}`}
-                                style={{ minHeight: '40px' }}
+                                placeholder={isListening ? "Listening..." : "Ask me anything..."}
+                                className={`flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none focus:border-none text-sm p-1 ml-1 placeholder-gray-400 ${isListening ? 'placeholder-indigo-600 font-medium' : ''}`}
+                                disabled={isListening}
+                                style={{ boxShadow: 'none' }} // Force remove any shadow/ring artifacts
                             />
 
-                            <div className="flex items-center gap-1 pb-1 flex-shrink-0">
+                            <div className="flex items-center gap-1.5 border-l border-gray-200 pl-2">
                                 {isSpeechSupported && (
                                     <button
                                         onClick={toggleListening}
-                                        className={`p-2 rounded-lg transition-all ${isListening
-                                            ? 'bg-red-100 text-red-600 animate-pulse ring-2 ring-red-200'
-                                            : 'text-gray-500 hover:text-indigo-600 hover:bg-gray-200'
+                                        className={`p-1.5 rounded-full transition-all duration-200 flex items-center justify-center w-8 h-8 ${isListening
+                                            ? 'bg-red-50 text-red-500 animate-pulse ring-1 ring-red-200'
+                                            : 'text-gray-400 hover:text-indigo-600 hover:bg-gray-100'
                                             }`}
                                         title={isListening ? "Stop listening" : "Use voice input"}
                                     >
-                                        {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                                        {isListening ? <MicOff size={16} /> : <Mic size={18} />}
                                     </button>
                                 )}
                                 <button
-                                    onClick={handleSend}
+                                    onClick={() => handleSend()}
                                     disabled={!inputValue.trim()}
-                                    className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md active:scale-95"
+                                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm ${inputValue.trim()
+                                        ? 'bg-gradient-to-tr from-indigo-600 to-purple-600 text-white hover:shadow-indigo-200 hover:shadow-lg hover:scale-105 active:scale-95'
+                                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
                                 >
-                                    <Send size={18} />
+                                    <Send size={16} className={inputValue.trim() ? 'ml-0.5' : ''} />
                                 </button>
                             </div>
-                        </div>
-                        <div className="text-center mt-2">
-                            <span className="text-[10px] text-gray-400 flex items-center justify-center gap-1">
-                                <FcFlashOn size={10} /> Powered by LeadQ AI
-                            </span>
                         </div>
                     </div>
                 </div>

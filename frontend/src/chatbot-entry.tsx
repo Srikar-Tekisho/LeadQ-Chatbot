@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import Chatbot from './components/Chatbot';
+import Chatbot from './modules/chatbot';
 import './index.css';
 
 const StandaloneChatbot = () => {

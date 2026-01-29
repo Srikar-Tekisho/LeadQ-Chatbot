@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MainDashboard from './components/MainDashboard';
 import SettingsDashboard from './components/SettingsDashboard';
-import Chatbot from './components/Chatbot';
+import Chatbot from './modules/chatbot';
 import Onboarding from './components/Onboarding';
 import FeedbackPopup from './components/FeedbackPopup';
 

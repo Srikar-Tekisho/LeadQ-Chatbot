@@ -1,20 +1,26 @@
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File
+import shutil
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uuid
 import time
+import re
+
+from openai import AsyncOpenAI
 
 # Load environment variables
 load_dotenv(dotenv_path="../.env.local")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 supabase: Client = None
+openai_client = None
 
 if SUPABASE_URL and SUPABASE_KEY:
     try:
@@ -22,6 +28,13 @@ if SUPABASE_URL and SUPABASE_KEY:
         print("Connected to Supabase")
     except Exception as e:
         print(f"Failed to connect to Supabase: {e}")
+
+if OPENAI_API_KEY:
+    try:
+        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        print("Connected to OpenAI (Async)")
+    except Exception as e:
+        print(f"Failed to initialize OpenAI: {e}")
 
 app = FastAPI(title="LeadQ Chatbot API", version="1.0.0")
 
@@ -78,27 +91,27 @@ KNOWLEDGE_BASE = {
     "pricing": {
         "keywords": ["price", "cost", "plan", "subscription", "bill"],
         "answer": "LeadQ offers three pricing tiers:\n- **Starter**: $29/mo for basic lead scoring and email outreach.\n- **Professional**: $99/mo for advanced analytics, CRM integration, and 3 users.\n- **Enterprise**: Custom pricing for unlimited users and dedicated support.",
-        "marketing_links": ["View Pricing Plans", "Compare Features"]
+        "marketing_links": ["What is the Starter plan?", "Tell me about Enterprise pricing", "How do I upgrade?"]
     },
     "features": {
         "keywords": ["feature", "do", "capability", "function"],
         "answer": "LeadQ provides a suite of sales intelligence tools:\n- **AI Lead Scoring**: Automatically rank leads based on conversion probability.\n- **Automated Outreach**: Personalized email sequences driven by AI.\n- **CRM Sync**: Seamless integration with Salesforce, HubSpot, and Pipedrive.\n- **Analytics Dashboard**: Real-time insights into your funnel performance.",
-        "marketing_links": ["Explore Features", "Request Demo"]
+        "marketing_links": ["How does lead scoring work?", "Explain automated outreach", "What CRMs do you support?"]
     },
     "support": {
         "keywords": ["help", "support", "contact", "issue", "bug", "ticket"],
         "answer": "Our support team is available 24/7. You can:\n- Email us at **support@leadq.ai**\n- Submit a ticket via the **Help & Support** tab in settings.\n- Chat with me (Veda) for immediate assistance!",
-        "marketing_links": ["Submit Ticket", "Read FAQs"]
+        "marketing_links": ["Open a support ticket", "Where is the settings tab?", "I found a bug"]
     },
     "about": {
         "keywords": ["leadq", "what is", "who are you", "veda"],
-        "answer": "I am **Veda**, your AI Sales Assistant. LeadQ is an all-in-one sales intelligence platform designed to help teams close more deals with less effort using AI-driven insights.",
-        "marketing_links": ["About Us", "Our Mission"]
+        "answer": "I am **Veda**, your AI Support Assistant. LeadQ is an all-in-one sales intelligence platform designed to help teams close more deals with less effort using AI-driven insights.",
+        "marketing_links": ["What features do you have?", "How much does it cost?", "Can I see a demo?"]
     },
     "integration": {
         "keywords": ["integrate", "connect", "salesforce", "hubspot", "api"],
         "answer": "We support native integrations with major CRMs including Salesforce, HubSpot, Zoho, and Pipedrive. You can configure these in the **Integrations** section of your dashboard.",
-        "marketing_links": ["Integration Setup", "API Docs"]
+        "marketing_links": ["How to connect Salesforce?", "Do you support HubSpot?", "Is there an API?"]
     }
 }
 
@@ -127,21 +140,135 @@ async def chat_endpoint(request: ChatRequest):
         except Exception: 
             pass
 
-    # 2. Generate Response
-    for topic, data in KNOWLEDGE_BASE.items():
-        if any(keyword in user_message for keyword in data["keywords"]):
-            response_text = data["answer"]
-            recommendations = data["marketing_links"]
-            found_match = True
-            break
+    # 2. Generate Response (RAG + Facade)
+    context_text = ""
     
+    # Embedding & Search
+    try:
+        if openai_client:
+            # Get User Embedding (Async)
+            # Note: openai_client should be AsyncOpenAI for true async, 
+            # checking if we initialized it as such or if we need to change init.
+            # Assuming we change init below, we use await here.
+            embedding_response = await openai_client.embeddings.create(
+                input=[user_message],
+                model="text-embedding-3-small"
+            )
+            query_embedding = embedding_response.data[0].embedding
+            
+            # Query Supabase Vector Store
+            if supabase:
+                rpc_response = supabase.rpc("match_documents", {
+                    "query_embedding": query_embedding,
+                    "match_threshold": 0.78, # Increased to reduce hallucinations
+                    "match_count": 2 # Reduced to improve speed
+                }).execute()
+                
+                if rpc_response.data:
+                    context_chunks = [item['content'] for item in rpc_response.data]
+                    context_text = "\n\n".join(context_chunks)
+                    print(f"Retrieved {len(context_chunks)} chunks for context.")
+    except Exception as e:
+        print(f"RAG Error: {e}")
+
+    # Fallback to local KB if no context found (or hybrid approach)
+    # For now, let's prioritize RAG if context exists, else use KB
+    
+    if context_text and openai_client:
+        # Generate with LLM using Context
+        system_prompt = f"""You are Veda, LeadQ's AI assistant. Answer ONLY from the Context below.
+
+Rules:
+- Be concise: 2-4 sentences max, ~50-80 words
+- Use **bold** for key terms
+- If info is NOT in Context, say: "I don't have that information. Would you like to open a support ticket?"
+- NEVER guess or make up information
+- End with: ###REC###Q1|Q2|Q3 (3 short follow-up questions, max 8 words each)
+
+Context:
+{context_text}
+"""
+        
+        try:
+            completion = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": request.message}
+                ],
+                temperature=0.1,
+                max_tokens=300,
+                top_p=0.9
+            )
+            full_response = completion.choices[0].message.content
+            
+            # Parse Response and Recommendations
+            if "###REC###" in full_response:
+                parts = full_response.split("###REC###")
+                response_text = parts[0].strip()
+                rec_string = parts[1].strip()
+                recommendations = [r.strip() for r in rec_string.split("|") if r.strip()]
+            else:
+                response_text = full_response
+                recommendations = []
+                
+            found_match = True
+        except Exception as e:
+            print(f"LLM Generation Error: {e}")
+            response_text = "I'm having trouble connecting to my brain right now. Please try again."
+
     if not found_match:
-        if "hello" in user_message or "hi" in user_message:
-             response_text = "Hello! I am Veda, your AI assistant. I can help you with pricing, features, integrations, and support. How can I assist you today?"
-             recommendations = ["Show Pricing", "Explain Features", "Contact Support"]
-        else:
-            response_text = "I can definitely help with that. Could you provide a bit more detail? I'm an expert on LeadQ's **Pricing**, **Features**, and **Integrations**."
-            recommendations = ["Pricing", "Features", "Support", "Integrations"]
+        # Fallback to Pattern Matching KB
+        for topic, data in KNOWLEDGE_BASE.items():
+            # Use strict word boundary regex to avoid false positives (e.g., "plan" in "planner")
+            if any(re.search(r'\b' + re.escape(k) + r'\b', user_message.lower()) for k in data['keywords']):
+                response_text = data["answer"]
+                recommendations = data["marketing_links"]
+                found_match = True
+                break
+    
+    if not found_match and not context_text:
+        # Final Fallback: Controlled General LLM
+        # If the user asks something relevant that isn't in our value store yet (like general definitions),
+        # we allow the LLM to answer BUT restrict it to the domain.
+        
+        fallback_prompt = f"""You are Veda, LeadQ's AI assistant for Sales & CRM topics only.
+
+User asked: "{user_message}"
+
+Rules:
+- If about Sales/Marketing/CRM/LeadQ: Answer in 2-3 sentences
+- If unrelated (movies, sports, etc): Say "I specialize in LeadQ and Sales Intelligence. I can't help with that."
+- End with: ###REC###Q1|Q2|Q3
+"""
+
+        try:
+             completion = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": fallback_prompt},
+                    {"role": "user", "content": request.message}
+                ],
+                temperature=0.2,
+                max_tokens=250
+            )
+             
+             full_response = completion.choices[0].message.content
+             if "###REC###" in full_response:
+                parts = full_response.split("###REC###")
+                response_text = parts[0].strip()
+                rec_string = parts[1].strip()
+                recommendations = [r.strip() for r in rec_string.split("|") if r.strip()]
+             else:
+                response_text = full_response
+                recommendations = ["What features does LeadQ have?", "How can you help me?", "Contact Support"]
+                
+             found_match = True
+
+        except Exception as e:
+            print(f"Fallback Generation Error: {e}")
+            response_text = "I'm not sure about that based on my current knowledge. Would you like me to open a support ticket for you?"
+            recommendations = ["Open Ticket", "Contact Support"]
     
     latency = (time.time() - start_time) * 1000
     
@@ -165,7 +292,7 @@ async def chat_endpoint(request: ChatRequest):
                "role": "assistant",
                "content": response_text,
                "recommendations": recommendations,
-               "meta": {"latency_ms": latency, "source": "fastapi-kb"}
+               "meta": {"latency_ms": latency, "source": "rag-openai"}
             }).execute()
             
         except Exception as e:
@@ -176,10 +303,32 @@ async def chat_endpoint(request: ChatRequest):
         recommendations=recommendations,
         sessionId=session_id,
         meta={
-            "source": "fastapi-knowledge-base",
+            "source": "rag-openai" if context_text else "fastapi-kb",
             "latency_ms": latency
         }
     )
+
+@app.post("/upload")
+async def upload_document(file: UploadFile = File(...)):
+    try:
+        if not file.filename.endswith(".txt") and not file.filename.endswith(".md"):
+             return {"status": "error", "message": "Only .txt and .md files are supported for now."}
+
+        file_path = os.path.join("documents", file.filename)
+        
+        # Save file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # Trigger Ingestion
+        # Lazy import to avoid circular dep if any, or just convenience
+        from scripts.ingest import ingest_files
+        ingest_files()
+        
+        return {"status": "success", "message": f"File {file.filename} uploaded and ingested successfully."}
+    except Exception as e:
+        print(f"Upload failed: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.post("/feedback")
 async def submit_feedback(request: FeedbackRequest):

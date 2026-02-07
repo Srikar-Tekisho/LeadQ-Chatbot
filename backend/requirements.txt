@@ -2,6 +2,6 @@ fastapi
 uvicorn
 pydantic
 python-multipart
-# Add any other dependencies here, e.g., for RAG if we implement it later
-# google-generative-ai 
-# python-dotenv
+openai
+tiktoken
+python-docx

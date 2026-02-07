@@ -1,6 +1,46 @@
 -- Enable UUID extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Enable pgvector extension for RAG
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 0. RAG Document Chunks Table
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    content TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb, -- e.g. {"source": "manual.pdf", "page": 1}
+    embedding vector(1536),             -- OpenAI text-embedding-3-small
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Function to match documents
+create or replace function match_documents (
+  query_embedding vector(1536),
+  match_threshold float,
+  match_count int
+)
+returns table (
+  id uuid,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+language plpgsql
+as $$
+begin
+  return query
+  select
+    document_chunks.id,
+    document_chunks.content,
+    document_chunks.metadata,
+    1 - (document_chunks.embedding <=> query_embedding) as similarity
+  from document_chunks
+  where 1 - (document_chunks.embedding <=> query_embedding) > match_threshold
+  order by document_chunks.embedding <=> query_embedding
+  limit match_count;
+end;
+$$;
+
 -- 1. Support Tickets Table (Matches /ticket endpoint)
 -- Handles submissions from "Help & Support" > "Submit Ticket"
 -- Payload: { category, priority, subject, description, user_id }

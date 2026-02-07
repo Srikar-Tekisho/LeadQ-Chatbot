@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FcCustomerSupport, FcFlashOn } from 'react-icons/fc';
-import { Send, X, Minimize2, Mic, MicOff } from 'lucide-react';
+import { Send, X, Minimize2, Mic, MicOff, MoreHorizontal, MessageSquarePlus, XCircle, History } from 'lucide-react';
 import { Button } from './UIComponents';
-import chatbotIcon from '../assets/chatbot-icon-transparent.webm';
+import chatbotIconTransparent from '../assets/chatbot-icon-transparent.webm';
+import chatbotIconOriginal from '../assets/chatbot-icon.webm';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
     id: string;
@@ -15,6 +18,74 @@ interface ChatbotProps {
     initialOpen?: boolean;
 }
 
+// Video Avatar Component with CSS-based background transparency
+interface VideoAvatarProps {
+    size?: 'small' | 'medium' | 'large';
+    className?: string;
+    onClick?: () => void;
+}
+
+const VideoAvatar: React.FC<VideoAvatarProps> = ({ size = 'medium', className = '', onClick }) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    
+    const sizeClasses = {
+        small: 'w-10 h-10 scale-150',
+        medium: 'w-24 h-24',
+        large: 'w-32 h-32'
+    };
+    
+    // Use the transparent version, with fallback handling
+    // If transparent video has issues, use original with CSS blend
+    const [useTransparent, setUseTransparent] = useState(true);
+    
+    const handleVideoError = () => {
+        console.log("Transparent video failed, using original with CSS blend");
+        setUseTransparent(false);
+    };
+    
+    return (
+        <div 
+            className={`relative ${className}`}
+            onClick={onClick}
+            style={{ isolation: 'isolate' }}
+        >
+            {useTransparent ? (
+                // Transparent WebM version
+                <video
+                    ref={videoRef}
+                    src={chatbotIconTransparent}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    onError={handleVideoError}
+                    className={`${sizeClasses[size]} object-contain drop-shadow-xl`}
+                    style={{ 
+                        background: 'transparent',
+                    }}
+                />
+            ) : (
+                // Fallback: Original video with CSS blend mode for background removal
+                <div className="relative" style={{ mixBlendMode: 'multiply' }}>
+                    <video
+                        ref={videoRef}
+                        src={chatbotIconOriginal}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className={`${sizeClasses[size]} object-contain drop-shadow-xl`}
+                        style={{ 
+                            background: 'transparent',
+                            filter: 'contrast(1.1) brightness(1.05)',
+                        }}
+                    />
+                </div>
+            )}
+        </div>
+    );
+};
+
 const getTimeBasedGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return "Good morning! 👋";
@@ -24,9 +95,92 @@ const getTimeBasedGreeting = () => {
 
 const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
     const [isOpen, setIsOpen] = useState(initialOpen);
+    const [isMinimized, setIsMinimized] = useState(false);
+    const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(true);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [chatHistory, setChatHistory] = useState<any[]>([]);
     const [messages, setMessages] = useState<Message[]>([
-        { id: '1', role: 'assistant', content: `${getTimeBasedGreeting()} I'm your AI assistant. How can I help you today?` }
+        {
+            id: '1',
+            role: 'assistant',
+            content: `${getTimeBasedGreeting()} I'm your AI Support Assistant. How can I help you today?`,
+            recommendations: ["What is LeadQ?", "Show me pricing", "How does it work?"]
+        }
     ]);
+
+    // Load history from local storage
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('leadq_chat_history');
+            if (saved) {
+                setChatHistory(JSON.parse(saved));
+            }
+        } catch (e) {
+            console.error("Failed to load history", e);
+        }
+    }, []);
+
+    const saveCurrentSession = () => {
+        if (messages.length <= 1) return; // Don't save empty chats
+
+        const preview = messages.find(m => m.role === 'user')?.content || "New Conversation";
+        const sessionData = {
+            id: sessionId,
+            date: new Date().toISOString(),
+            preview: preview.substring(0, 40) + (preview.length > 40 ? "..." : ""),
+            messages: messages
+        };
+
+        const updatedHistory = [sessionData, ...chatHistory.filter(h => h.id !== sessionId)].slice(0, 10); // Keep last 10
+        setChatHistory(updatedHistory);
+        localStorage.setItem('leadq_chat_history', JSON.stringify(updatedHistory));
+    };
+
+    const handleNewChat = () => {
+        saveCurrentSession();
+        setMessages([
+            {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: `${getTimeBasedGreeting()} I'm your AI Support Assistant. How can I help you today?`,
+                recommendations: ["What is LeadQ?", "Show me pricing", "How does it work?"]
+            }
+        ]);
+        const newId = Date.now().toString();
+        setSessionId(newId);
+        localStorage.setItem('chatSessionId', newId);
+        setIsMenuOpen(false);
+        setShowHistory(false);
+    };
+
+    const handleEndChat = () => {
+        saveCurrentSession();
+        setIsOpen(false);
+        setIsMenuOpen(false);
+        setTimeout(() => {
+            // Reset UI state but keep session until next open? 
+            // Actually, usually end chat implies reset.
+            handleNewChat();
+        }, 300);
+    };
+
+    const handleViewHistory = () => {
+        saveCurrentSession(); // Save current before switching view
+        setShowHistory(true);
+        setIsMenuOpen(false);
+    };
+
+    const restoreSession = (historyItem: any) => {
+        // Save current *before* restoring old one? Maybe not needed if we just view history.
+        // But user might lose current text. Optimistically save current first.
+        saveCurrentSession();
+
+        setMessages(historyItem.messages);
+        setSessionId(historyItem.id);
+        localStorage.setItem('chatSessionId', historyItem.id);
+        setShowHistory(false);
+    };
     const [inputValue, setInputValue] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     const [sessionId, setSessionId] = useState<string | null>(localStorage.getItem('chatSessionId'));
@@ -74,22 +228,29 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
             setIsSpeechSupported(true);
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
             recognitionRef.current = new SpeechRecognition();
-            recognitionRef.current.continuous = false;
-            recognitionRef.current.interimResults = true;
+            recognitionRef.current.continuous = false; // Stop after silence
+            recognitionRef.current.interimResults = false; // Only use FINAL results to reduce hallucinations
             recognitionRef.current.lang = 'en-US';
+            recognitionRef.current.maxAlternatives = 1; // Only get best result
+
+            recognitionRef.current.onstart = () => {
+                setIsListening(true);
+            };
 
             recognitionRef.current.onresult = (event: any) => {
-                let interimTranscript = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        setInputValue(prev => prev + event.results[i][0].transcript);
-                    } else {
-                        interimTranscript += event.results[i][0].transcript;
+                // Only process final results to reduce hallucinations
+                const result = event.results[event.results.length - 1];
+                if (result.isFinal) {
+                    const transcript = result[0].transcript.trim();
+                    const confidence = result[0].confidence;
+                    
+                    // Only accept if confidence is above threshold (0.7)
+                    if (confidence >= 0.7 && transcript) {
+                        const base = recognitionRef.current.baseText || "";
+                        setInputValue(base + (base ? " " : "") + transcript);
+                    } else if (confidence < 0.7) {
+                        console.log("Low confidence speech result ignored:", transcript, confidence);
                     }
-                }
-                // Optional: You could show interim results ghosted in the UI
-                if (interimTranscript) {
-                    setInputValue(interimTranscript);
                 }
             };
 
@@ -112,9 +273,10 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
             setIsListening(false);
         } else {
             try {
+                // Store current text as base
+                recognitionRef.current.baseText = inputValue;
                 recognitionRef.current.start();
-                setIsListening(true);
-                setInputValue(""); // Clear input when starting fresh listener
+                // State update happens in onstart
             } catch (error) {
                 console.error("Error starting speech recognition:", error);
             }
@@ -184,15 +346,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                     {/* Header */}
                     <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 flex items-center justify-between text-white shadow-md">
                         <div className="flex items-center gap-3">
-                            <video
-                                src={chatbotIcon}
-                                autoPlay
-                                loop
-                                muted
-                                playsInline
-                                className="w-10 h-10 object-contain drop-shadow-sm scale-150"
-                                style={{ background: 'transparent' }}
-                            />
+                            <VideoAvatar size="small" />
                             <div>
                                 <h3 className="font-bold text-sm">Veda Support</h3>
                                 <div className="flex items-center gap-1.5 opacity-90">
@@ -202,6 +356,48 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
+                            {/* Menu Button */}
+                            <div className="relative">
+                                <button
+                                    onClick={() => setIsMenuOpen(!isMenuOpen)}
+                                    className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                                >
+                                    <MoreHorizontal size={20} />
+                                </button>
+
+                                {/* Dropdown Menu */}
+                                {isMenuOpen && (
+                                    <>
+                                        {/* Backdrop to close */}
+                                        <div className="fixed inset-0 z-10" onClick={() => setIsMenuOpen(false)}></div>
+
+                                        <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 text-gray-700 z-20 animate-in fade-in zoom-in-95 duration-200">
+                                            <button
+                                                onClick={handleNewChat}
+                                                className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                                            >
+                                                <MessageSquarePlus size={16} className="text-indigo-600" />
+                                                Start a new chat
+                                            </button>
+                                            <button
+                                                onClick={handleEndChat}
+                                                className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors text-gray-500 hover:text-red-500"
+                                            >
+                                                <XCircle size={16} />
+                                                End chat
+                                            </button>
+                                            <div className="h-px bg-gray-100 my-1"></div>
+                                            <button
+                                                className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors text-gray-600"
+                                            >
+                                                <History size={16} />
+                                                View recent chats
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
                             <button onClick={() => setIsOpen(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
                                 <X size={20} />
                             </button>
@@ -222,7 +418,15 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                                         ? 'bg-indigo-600 text-white rounded-tr-sm'
                                         : 'bg-white text-gray-800 border border-gray-100 rounded-tl-sm'
                                         }`}>
-                                        {msg.content}
+                                        <div className={`prose prose-sm max-w-none ${msg.role === 'user' ? 'prose-invert' : 'prose-stone'}`}>
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                                                p: ({ node, ...props }) => <p className="mb-1 last:mb-0" {...props} />,
+                                                ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                li: ({ node, ...props }) => <li className="pl-1" {...props} />
+                                            }}>
+                                                {msg.content}
+                                            </ReactMarkdown>
+                                        </div>
                                     </div>
                                 </div>
                                 {/* Recommendations Chips */}
@@ -254,26 +458,42 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                     </div>
 
                     {/* Input Area */}
-                    <div className="p-3 bg-white border-t border-gray-100">
-                        <div className="flex items-end gap-2 bg-gray-100 rounded-xl p-2 border border-transparent focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-500 transition-all shadow-inner">
+                    <div className="p-4 bg-white">
+                        {showPrivacyPolicy && (
+                            <div className="flex justify-between items-center bg-gray-50 px-3 py-2 mb-2 rounded-lg text-xs text-gray-500 animate-fade-in-up">
+                                <span>
+                                    By chatting, you agree to our <a href="#" className="underline hover:text-gray-700">privacy policy</a>.
+                                </span>
+                                <button
+                                    onClick={() => setShowPrivacyPolicy(false)}
+                                    className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        )}
+                        <div className="flex items-center gap-2 bg-gray-50 rounded-full px-4 py-2 border border-gray-200 focus-within:border-gray-300 focus-within:shadow-sm transition-all">
                             <textarea
                                 ref={textareaRef}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={handleKeyPress}
                                 rows={1}
-                                placeholder={isListening ? "Listening..." : "Ask for help..."}
-                                className={`w-full bg-transparent border-none focus:ring-0 resize-none py-2 px-1 text-sm max-h-32 overflow-y-auto ${isListening ? 'placeholder-indigo-500 animate-pulse' : ''}`}
-                                style={{ minHeight: '40px' }}
+                                placeholder={isListening ? "Listening..." : "Ask me anything..."}
+                                className={`flex-1 bg-transparent border-none focus:ring-0 resize-none py-2 text-sm text-gray-600 placeholder-gray-400 max-h-32 overflow-hidden outline-none ${isListening ? 'animate-pulse placeholder-indigo-500' : ''}`}
+                                style={{ minHeight: '24px' }}
                             />
 
-                            <div className="flex items-center gap-1 pb-1 flex-shrink-0">
+                            {/* Separator */}
+                            <div className="w-px h-6 bg-gray-300 mx-1"></div>
+
+                            <div className="flex items-center gap-1 flex-shrink-0">
                                 {isSpeechSupported && (
                                     <button
                                         onClick={toggleListening}
-                                        className={`p-2 rounded-lg transition-all ${isListening
-                                            ? 'bg-red-100 text-red-600 animate-pulse ring-2 ring-red-200'
-                                            : 'text-gray-500 hover:text-indigo-600 hover:bg-gray-200'
+                                        className={`p-2 rounded-full transition-all ${isListening
+                                            ? 'bg-red-50 text-red-500 animate-pulse'
+                                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                                             }`}
                                         title={isListening ? "Stop listening" : "Use voice input"}
                                     >
@@ -281,18 +501,16 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                                     </button>
                                 )}
                                 <button
-                                    onClick={handleSend}
+                                    onClick={() => handleSend()}
                                     disabled={!inputValue.trim()}
-                                    className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md active:scale-95"
+                                    className="p-2 bg-gray-200 text-gray-500 rounded-full hover:bg-indigo-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-200 disabled:hover:text-gray-500 transition-all"
                                 >
-                                    <Send size={18} />
+                                    <Send size={16} className={inputValue.trim() ? "ml-0.5" : ""} />
                                 </button>
                             </div>
                         </div>
-                        <div className="text-center mt-2">
-                            <span className="text-[10px] text-gray-400 flex items-center justify-center gap-1">
-                                <FcFlashOn size={10} /> Powered by LeadQ AI
-                            </span>
+                        <div className="text-center mt-2 opacity-0 h-0">
+                            {/* Hidden Footer to save space */}
                         </div>
                     </div>
                 </div>
@@ -301,15 +519,54 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
 
             {/* Toggle Button */}
             {/* Launcher / Toggle Button */}
-            {
-                !isOpen && (
-                    <div className="relative flex flex-col items-end">
-                        {/* Floating Message Bubble */}
-                        {/* Floating Message Bubble */}
-                        {/* Floating Message Cloud */}
+            {!isOpen && (
+                isMinimized ? (
+                    /* Minimized State - Robot icon only (no bubble) */
+                    <div className="relative flex flex-col items-end group">
+                        {/* Expand Control - Visible on hover */}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsMinimized(false);
+                            }}
+                            className="absolute -top-2 -right-2 z-10 bg-white text-gray-500 hover:text-indigo-600 hover:bg-gray-50 p-1.5 rounded-full shadow-md border border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                            title="Expand chatbot"
+                        >
+                            <MessageSquarePlus size={16} />
+                        </button>
+
                         <div
                             onClick={() => setIsOpen(true)}
-                            className="mb-3 mr-2 bg-blue-600 text-white px-5 py-3 rounded-2xl rounded-br-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] cursor-pointer transform transition-all duration-300 hover:scale-105 hover:shadow-2xl animate-fade-in-up border border-blue-500 max-w-[200px]"
+                            className="cursor-pointer transition-transform duration-300 hover:scale-105 relative"
+                            role="button"
+                            tabIndex={0}
+                            aria-label="Open chatbot"
+                            onKeyPress={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') setIsOpen(true);
+                            }}
+                        >
+                            <VideoAvatar size="medium" />
+                        </div>
+                    </div>
+                ) : (
+                    /* Maximized State - Full Avatar & Bubble */
+                    <div className="relative flex flex-col items-end group">
+                        {/* Minimize Control - Visible on hover or always */}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsMinimized(true);
+                            }}
+                            className="absolute -top-2 -right-2 z-10 bg-white text-gray-500 hover:text-indigo-600 hover:bg-gray-50 p-1.5 rounded-full shadow-md border border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                            title="Minimize chatbot"
+                        >
+                            <Minimize2 size={16} />
+                        </button>
+
+                        {/* Floating Message Bubble */}
+                        <div
+                            onClick={() => setIsOpen(true)}
+                            className="mb-3 mr-2 bg-blue-600 text-white px-5 py-3 rounded-2xl rounded-br-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] cursor-pointer transform transition-all duration-300 hover:scale-105 hover:shadow-2xl animate-fade-in-up border border-blue-500 max-w-[200px] relative"
                         >
                             <p className="text-sm font-semibold leading-snug flex items-start gap-2">
                                 <span className="text-lg">👋</span>
@@ -321,26 +578,18 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
 
                         <div
                             onClick={() => setIsOpen(true)}
-                            className="cursor-pointer transition-transform duration-300 hover:scale-105"
+                            className="cursor-pointer transition-transform duration-300 hover:scale-105 relative"
                             role="button"
                             tabIndex={0}
                             onKeyPress={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') setIsOpen(true);
                             }}
                         >
-                            <video
-                                src={chatbotIcon}
-                                autoPlay
-                                loop
-                                muted
-                                playsInline
-                                className="w-32 h-32 object-contain drop-shadow-xl"
-                                style={{ background: 'transparent' }}
-                            />
+                            <VideoAvatar size="large" />
                         </div>
                     </div>
                 )
-            }
+            )}
         </div >
     );
 };

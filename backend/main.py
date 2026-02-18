@@ -183,7 +183,9 @@ Rules:
 - Use **bold** for key terms
 - If info is NOT in Context, say: "I don't have that information. Would you like to open a support ticket?"
 - NEVER guess or make up information
-- End with: ###REC###Q1|Q2|Q3 (3 short follow-up questions, max 8 words each)
+- After your answer, add exactly 3 follow-up questions in this format:
+  ###REC###First actual question here|Second actual question here|Third actual question here
+- Each question must be a real, helpful question (max 8 words), NOT placeholders like Q1, Q2, Q3
 
 Context:
 {context_text}
@@ -239,7 +241,9 @@ User asked: "{user_message}"
 Rules:
 - If about Sales/Marketing/CRM/LeadQ: Answer in 2-3 sentences
 - If unrelated (movies, sports, etc): Say "I specialize in LeadQ and Sales Intelligence. I can't help with that."
-- End with: ###REC###Q1|Q2|Q3
+- After your answer, add exactly 3 follow-up questions in this format:
+  ###REC###First actual question here|Second actual question here|Third actual question here
+- Each question must be a real, helpful question (max 8 words), NOT placeholders like Q1, Q2, Q3
 """
 
         try:

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FcCustomerSupport, FcFlashOn } from 'react-icons/fc';
-import { Send, X, Minimize2, Mic, MicOff, MoreHorizontal, MessageSquarePlus, XCircle, History } from 'lucide-react';
+import { Send, X, Minimize2, Mic, MicOff, MoreHorizontal, MessageSquarePlus, XCircle, History, ChevronLeft, Clock } from 'lucide-react';
 import { Button } from './UIComponents';
 import chatbotIconTransparent from '../assets/chatbot-icon-transparent.webm';
 import chatbotIconOriginal from '../assets/chatbot-icon.webm';
@@ -388,6 +388,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                                             </button>
                                             <div className="h-px bg-gray-100 my-1"></div>
                                             <button
+                                                onClick={handleViewHistory}
                                                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors text-gray-600"
                                             >
                                                 <History size={16} />
@@ -404,6 +405,73 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                         </div>
                     </div>
 
+                    {/* History View */}
+                    {showHistory ? (
+                        <div className="flex-1 flex flex-col bg-white">
+                            {/* History Header */}
+                            <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+                                <button
+                                    onClick={() => setShowHistory(false)}
+                                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                                >
+                                    <ChevronLeft size={20} className="text-gray-600" />
+                                </button>
+                                <div className="flex items-center gap-2">
+                                    <Clock size={18} className="text-gray-500" />
+                                    <h3 className="font-semibold text-gray-800">Recent chats</h3>
+                                </div>
+                            </div>
+
+                            {/* History List */}
+                            <div className="flex-1 overflow-y-auto">
+                                {chatHistory.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full text-gray-400 p-8">
+                                        <History size={48} className="mb-4 opacity-50" />
+                                        <p className="text-sm">No recent chats yet</p>
+                                        <p className="text-xs mt-1">Start a conversation to see it here</p>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-gray-100">
+                                        {chatHistory.map((item) => (
+                                            <button
+                                                key={item.id}
+                                                onClick={() => restoreSession(item)}
+                                                className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
+                                            >
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-medium text-gray-800 text-sm truncate">
+                                                            {item.preview || "New Chat"}
+                                                        </p>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            {item.messages?.find((m: Message) => m.role === 'assistant')?.content?.substring(0, 50) || "Veda AI Agent:"}...
+                                                        </p>
+                                                    </div>
+                                                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
+                                                        {new Date(item.date).toLocaleDateString() === new Date().toLocaleDateString()
+                                                            ? "Just now"
+                                                            : new Date(item.date).toLocaleDateString()}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Start New Chat Button */}
+                            <div className="p-4 border-t border-gray-100">
+                                <button
+                                    onClick={handleNewChat}
+                                    className="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-3 px-4 rounded-full font-medium text-sm transition-colors"
+                                >
+                                    <MessageSquarePlus size={18} />
+                                    Start a new chat
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
                     {/* Messages Area */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
                         {messages.map((msg) => (
@@ -460,9 +528,9 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                     {/* Input Area */}
                     <div className="p-4 bg-white">
                         {showPrivacyPolicy && (
-                            <div className="flex justify-between items-center bg-gray-50 px-3 py-2 mb-2 rounded-lg text-xs text-gray-500 animate-fade-in-up">
+                            <div className="flex justify-between items-center bg-transparent px-3 py-2 mb-2 text-xs text-gray-500 animate-fade-in-up">
                                 <span>
-                                    By chatting, you agree to our <a href="#" className="underline hover:text-gray-700">privacy policy</a>.
+                                    By chatting, you agree to our <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700">privacy policy</a>.
                                 </span>
                                 <button
                                     onClick={() => setShowPrivacyPolicy(false)}
@@ -472,20 +540,17 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                                 </button>
                             </div>
                         )}
-                        <div className="flex items-center gap-2 bg-gray-50 rounded-full px-4 py-2 border border-gray-200 focus-within:border-gray-300 focus-within:shadow-sm transition-all">
+                        <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-2 border border-gray-100 focus-within:border-gray-200 focus-within:shadow-sm transition-all">
                             <textarea
                                 ref={textareaRef}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={handleKeyPress}
                                 rows={1}
-                                placeholder={isListening ? "Listening..." : "Ask me anything..."}
+                                placeholder={isListening ? "Listening..." : "Message..."}
                                 className={`flex-1 bg-transparent border-none focus:ring-0 resize-none py-2 text-sm text-gray-600 placeholder-gray-400 max-h-32 overflow-hidden outline-none ${isListening ? 'animate-pulse placeholder-indigo-500' : ''}`}
                                 style={{ minHeight: '24px' }}
                             />
-
-                            {/* Separator */}
-                            <div className="w-px h-6 bg-gray-300 mx-1"></div>
 
                             <div className="flex items-center gap-1 flex-shrink-0">
                                 {isSpeechSupported && (
@@ -513,6 +578,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                             {/* Hidden Footer to save space */}
                         </div>
                     </div>
+                        </>
+                    )}
                 </div>
             )
             }

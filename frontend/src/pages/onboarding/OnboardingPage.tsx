@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import Onboarding from '../../components/Onboarding';
-import { ToastProvider } from '../../components/ToastContext';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { ToastProvider } from '../../components/ToastContext';
+import Chatbot from '../../components/Chatbot';
+import Onboarding from '../../components/Onboarding';
 
 const OnboardingPage: React.FC = () => {
   const [completed, setCompleted] = useState(false);
@@ -98,6 +99,7 @@ const OnboardingPage: React.FC = () => {
               </div>
             )}
           </div>
+          <Chatbot />
         </div>
       </ToastProvider>
     </ErrorBoundary>

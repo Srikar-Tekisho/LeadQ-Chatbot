@@ -2,6 +2,7 @@ import React from 'react';
 import { ToastProvider } from '../../components/ToastContext';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { Card } from '../../components/UIComponents';
+import Chatbot from '../../components/Chatbot';
 import { Bell, Search, Briefcase, TrendingUp, ClipboardList, Calendar, Settings, Mail, UserPlus, BarChart, ExternalLink } from 'lucide-react';
 
 const DashboardPage: React.FC = () => {
@@ -176,6 +177,7 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
           </main>
+          <Chatbot />
         </div>
       </ToastProvider>
     </ErrorBoundary>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useToast } from './ToastContext';
 import { FcCustomerSupport, FcFlashOn } from 'react-icons/fc';
-import { Send, X, Minimize2, Mic, MicOff, MoreHorizontal, MessageSquarePlus, XCircle, History, ChevronLeft, Clock } from 'lucide-react';
+import { Send, X, Minimize2, Mic, MicOff, MoreHorizontal, MessageSquarePlus, XCircle, History, ChevronLeft, Clock, ThumbsUp, ThumbsDown, RotateCcw, Copy } from 'lucide-react';
 import { Button } from './UIComponents';
 import chatbotIconTransparent from '../assets/chatbot-icon-transparent.webm';
 import chatbotIconOriginal from '../assets/chatbot-icon.webm';
@@ -12,6 +13,7 @@ interface Message {
     role: 'user' | 'assistant';
     content: string;
     recommendations?: string[];
+    feedback?: 'like' | 'dislike' | null;
 }
 
 interface ChatbotProps {
@@ -27,24 +29,24 @@ interface VideoAvatarProps {
 
 const VideoAvatar: React.FC<VideoAvatarProps> = ({ size = 'medium', className = '', onClick }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    
+
     const sizeClasses = {
         small: 'w-10 h-10 scale-150',
         medium: 'w-24 h-24',
         large: 'w-32 h-32'
     };
-    
+
     // Use the transparent version, with fallback handling
     // If transparent video has issues, use original with CSS blend
     const [useTransparent, setUseTransparent] = useState(true);
-    
+
     const handleVideoError = () => {
         console.log("Transparent video failed, using original with CSS blend");
         setUseTransparent(false);
     };
-    
+
     return (
-        <div 
+        <div
             className={`relative ${className}`}
             onClick={onClick}
             style={{ isolation: 'isolate' }}
@@ -60,7 +62,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({ size = 'medium', className = 
                     playsInline
                     onError={handleVideoError}
                     className={`${sizeClasses[size]} object-contain drop-shadow-xl`}
-                    style={{ 
+                    style={{
                         background: 'transparent',
                     }}
                 />
@@ -75,7 +77,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({ size = 'medium', className = 
                         muted
                         playsInline
                         className={`${sizeClasses[size]} object-contain drop-shadow-xl`}
-                        style={{ 
+                        style={{
                             background: 'transparent',
                             filter: 'contrast(1.1) brightness(1.05)',
                         }}
@@ -186,8 +188,12 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
     const [sessionId, setSessionId] = useState<string | null>(localStorage.getItem('chatSessionId'));
     const [isListening, setIsListening] = useState(false);
     const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+    const { addToast } = useToast();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<any>(null);
+    const silenceTimerRef = useRef<any>(null);
+    const isListeningRef = useRef(false);
+    const lastTranscriptRef = useRef("");
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Floating interaction messages
@@ -216,6 +222,10 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
     }, [messages, isOpen]);
 
     useEffect(() => {
+        isListeningRef.current = isListening;
+    }, [isListening]);
+
+    useEffect(() => {
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
@@ -228,42 +238,102 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
             setIsSpeechSupported(true);
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
             recognitionRef.current = new SpeechRecognition();
-            recognitionRef.current.continuous = false; // Stop after silence
-            recognitionRef.current.interimResults = false; // Only use FINAL results to reduce hallucinations
+            recognitionRef.current.continuous = true; // Stay active to allow for pauses
+            recognitionRef.current.interimResults = true; // Show text as it's spoken
             recognitionRef.current.lang = 'en-US';
-            recognitionRef.current.maxAlternatives = 1; // Only get best result
+            recognitionRef.current.maxAlternatives = 1;
+
+            const resetSilenceTimer = () => {
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                silenceTimerRef.current = setTimeout(() => {
+                    // Use ref to check current state without stale closure
+                    if (recognitionRef.current && isListeningRef.current) {
+                        console.log("Silence detected, automatically stopping microphone");
+                        try {
+                            recognitionRef.current.stop();
+                        } catch (e) {
+                            console.error("Error stopping recognition:", e);
+                        }
+                    }
+                }, 5000); // 5 seconds of silence
+            };
 
             recognitionRef.current.onstart = () => {
                 setIsListening(true);
+                lastTranscriptRef.current = "";
+                resetSilenceTimer();
             };
 
             recognitionRef.current.onresult = (event: any) => {
-                // Only process final results to reduce hallucinations
-                const result = event.results[event.results.length - 1];
-                if (result.isFinal) {
-                    const transcript = result[0].transcript.trim();
-                    const confidence = result[0].confidence;
-                    
-                    // Only accept if confidence is above threshold (0.7)
-                    if (confidence >= 0.7 && transcript) {
-                        const base = recognitionRef.current.baseText || "";
-                        setInputValue(base + (base ? " " : "") + transcript);
-                    } else if (confidence < 0.7) {
-                        console.log("Low confidence speech result ignored:", transcript, confidence);
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const result = event.results[i];
+                    const transcript = result[0].transcript;
+                    if (result.isFinal) {
+                        // Accuracy Tuning: Lower threshold to 0.3 for "exact" capture. 
+                        // High quality mics need less, but 0.3 allows for quiet/slurred words.
+                        if (result[0].confidence >= 0.3) {
+                            finalTranscript += (finalTranscript ? " " : "") + transcript.trim();
+                        } else {
+                            console.log("Low confidence final result ignored:", transcript, result[0].confidence);
+                        }
+                    } else {
+                        interimTranscript += (interimTranscript ? " " : "") + transcript.trim();
                     }
+                }
+
+                const currentText = (finalTranscript || interimTranscript).trim();
+
+                // Zero-Latency: Always reset silence timer if we got any text
+                if (currentText.length > 0) {
+                    resetSilenceTimer();
+                    lastTranscriptRef.current = currentText;
+                }
+
+                const base = recognitionRef.current.baseText || "";
+
+                if (finalTranscript) {
+                    const newBase = base + (base ? " " : "") + finalTranscript;
+                    recognitionRef.current.baseText = newBase;
+                    setInputValue(newBase + (interimTranscript ? " " + interimTranscript : ""));
+                } else {
+                    setInputValue(base + (base && interimTranscript ? " " : "") + interimTranscript);
                 }
             };
 
             recognitionRef.current.onend = () => {
                 setIsListening(false);
+                lastTranscriptRef.current = "";
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             };
 
             recognitionRef.current.onerror = (event: any) => {
                 console.error("Speech recognition error", event.error);
                 setIsListening(false);
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+                if (event.error === 'not-allowed') {
+                    addToast("Microphone access blocked. Please enable it in browser settings.", "error");
+                } else if (event.error === 'network') {
+                    addToast("Network error occurred during speech recognition.", "error");
+                } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    addToast(`Speech recognition error: ${event.error}`, "error");
+                }
             };
         }
-    }, []);
+
+        // Cleanup on unmount
+        return () => {
+            if (recognitionRef.current) {
+                try {
+                    recognitionRef.current.stop();
+                } catch (e) { }
+            }
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        };
+    }, [addToast]);
 
     const toggleListening = () => {
         if (!isSpeechSupported || !recognitionRef.current) return;
@@ -283,13 +353,16 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
         }
     };
 
-    const handleSend = async (text?: string) => {
+    const handleSend = async (text?: string, skipUserMessage: boolean = false, regenerate: boolean = false) => {
         const messageText = text || inputValue;
         if (!messageText.trim()) return;
 
-        const userMsg: Message = { id: Date.now().toString(), role: 'user', content: messageText };
-        setMessages(prev => [...prev, userMsg]);
-        setInputValue("");
+        if (!skipUserMessage) {
+            const userMsg: Message = { id: Date.now().toString(), role: 'user', content: messageText };
+            setMessages(prev => [...prev, userMsg]);
+            setInputValue("");
+        }
+
         setIsTyping(true);
 
         try {
@@ -300,7 +373,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                 },
                 body: JSON.stringify({
                     message: messageText,
-                    sessionId: sessionId
+                    sessionId: sessionId,
+                    regenerate: regenerate
                 }),
             });
 
@@ -335,6 +409,32 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
+        }
+    };
+
+    const handleFeedback = (msgId: string, type: 'like' | 'dislike') => {
+        setMessages(prev => prev.map(m =>
+            m.id === msgId ? { ...m, feedback: m.feedback === type ? null : type } : m
+        ));
+    };
+
+    const handleCopy = (content: string) => {
+        navigator.clipboard.writeText(content).then(() => {
+            addToast("Copied to clipboard!", "success");
+        }).catch(err => {
+            console.error("Copy failed:", err);
+            addToast("Failed to copy", "error");
+        });
+    };
+
+    const handleRegenerate = (msgId: string) => {
+        const idx = messages.findIndex(m => m.id === msgId);
+        if (idx > 0 && messages[idx - 1].role === 'user') {
+            const previousUserMessage = messages[idx - 1].content;
+            // Remove ONLY the current assistant message
+            setMessages(prev => prev.filter(m => m.id !== msgId));
+            // Regenerate with a flag to force new LLM variety
+            handleSend(previousUserMessage, true, true);
         }
     };
 
@@ -472,112 +572,147 @@ const Chatbot: React.FC<ChatbotProps> = ({ initialOpen = false }) => {
                         </div>
                     ) : (
                         <>
-                    {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-                        {messages.map((msg) => (
-                            <div key={msg.id} className="flex flex-col w-full mb-2">
-                                <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                    {msg.role === 'assistant' && (
-                                        <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center mr-2 flex-shrink-0 shadow-sm text-lg">
-                                            🤖
+                            {/* Messages Area */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                                {messages.map((msg, index) => (
+                                    <div key={msg.id} className="flex flex-col w-full mb-2">
+                                        <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                            {msg.role === 'assistant' && (
+                                                <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center mr-2 flex-shrink-0 shadow-sm text-lg">
+                                                    🤖
+                                                </div>
+                                            )}
+                                            <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm shadow-sm leading-relaxed ${msg.role === 'user'
+                                                ? 'bg-indigo-600 text-white rounded-tr-sm'
+                                                : 'bg-white text-gray-800 border border-gray-100 rounded-tl-sm'
+                                                }`}>
+                                                <div className={`prose prose-sm max-w-none ${msg.role === 'user' ? 'prose-invert' : 'prose-stone'}`}>
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                                                        p: ({ node, ...props }) => <p className="mb-1 last:mb-0" {...props} />,
+                                                        ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                        li: ({ node, ...props }) => <li className="pl-1" {...props} />
+                                                    }}>
+                                                        {msg.content}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            </div>
                                         </div>
-                                    )}
-                                    <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm shadow-sm leading-relaxed ${msg.role === 'user'
-                                        ? 'bg-indigo-600 text-white rounded-tr-sm'
-                                        : 'bg-white text-gray-800 border border-gray-100 rounded-tl-sm'
-                                        }`}>
-                                        <div className={`prose prose-sm max-w-none ${msg.role === 'user' ? 'prose-invert' : 'prose-stone'}`}>
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                                                p: ({ node, ...props }) => <p className="mb-1 last:mb-0" {...props} />,
-                                                ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                                                li: ({ node, ...props }) => <li className="pl-1" {...props} />
-                                            }}>
-                                                {msg.content}
-                                            </ReactMarkdown>
+
+                                        {/* Action Buttons for Assistant (Except Greeting) */}
+                                        {msg.role === 'assistant' && index !== 0 && (
+                                            <div className="flex items-center gap-1 ml-10 mt-1 opacity-70 hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => handleFeedback(msg.id, 'like')}
+                                                    className={`p-1.5 rounded-full hover:bg-gray-100 transition-colors ${msg.feedback === 'like' ? 'text-green-500 bg-green-50' : 'text-gray-400'}`}
+                                                    title="Love this answer"
+                                                >
+                                                    <ThumbsUp size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleFeedback(msg.id, 'dislike')}
+                                                    className={`p-1.5 rounded-full hover:bg-gray-100 transition-colors ${msg.feedback === 'dislike' ? 'text-red-500 bg-red-50' : 'text-gray-400'}`}
+                                                    title="Not helpful"
+                                                >
+                                                    <ThumbsDown size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleRegenerate(msg.id)}
+                                                    className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-indigo-600 transition-colors"
+                                                    title="Regenerate answer"
+                                                >
+                                                    <RotateCcw size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleCopy(msg.content)}
+                                                    className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-indigo-600 transition-colors"
+                                                    title="Copy answer"
+                                                >
+                                                    <Copy size={14} />
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Recommendations Chips */}
+                                        {msg.role === 'assistant' && msg.recommendations && msg.recommendations.length > 0 && (
+                                            <div className="flex flex-wrap gap-2 ml-10 mt-1 animate-fade-in-up">
+                                                {msg.recommendations.map((rec, idx) => (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => handleSend(rec)}
+                                                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-medium rounded-full border border-indigo-100 transition-colors shadow-sm text-left"
+                                                    >
+                                                        {rec}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                                {isTyping && (
+                                    <div className="flex justify-start">
+                                        <div className="bg-white border border-gray-200 p-3 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-1 ml-10">
+                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-0"></div>
+                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></div>
+                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-300"></div>
                                         </div>
                                     </div>
-                                </div>
-                                {/* Recommendations Chips */}
-                                {msg.role === 'assistant' && msg.recommendations && msg.recommendations.length > 0 && (
-                                    <div className="flex flex-wrap gap-2 ml-10 mt-1 animate-fade-in-up">
-                                        {msg.recommendations.map((rec, idx) => (
+                                )}
+                                <div ref={messagesEndRef} />
+                            </div>
+
+                            {/* Input Area */}
+                            <div className="p-4 bg-white">
+                                {showPrivacyPolicy && (
+                                    <div className="flex justify-between items-center bg-transparent px-3 py-2 mb-2 text-xs text-gray-500 animate-fade-in-up">
+                                        <span>
+                                            By chatting, you agree to our <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700">privacy policy</a>.
+                                        </span>
+                                        <button
+                                            onClick={() => setShowPrivacyPolicy(false)}
+                                            className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-2 border border-gray-100 focus-within:border-gray-200 focus-within:shadow-sm transition-all">
+                                    <textarea
+                                        ref={textareaRef}
+                                        value={inputValue}
+                                        onChange={(e) => setInputValue(e.target.value)}
+                                        onKeyDown={handleKeyPress}
+                                        rows={1}
+                                        placeholder={isListening ? "Listening..." : "Message..."}
+                                        className={`flex-1 bg-transparent border-none focus:ring-0 resize-none py-2 text-sm text-gray-600 placeholder-gray-400 max-h-32 overflow-hidden outline-none ${isListening ? 'animate-pulse placeholder-indigo-500' : ''}`}
+                                        style={{ minHeight: '24px' }}
+                                    />
+
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                        {isSpeechSupported && (
                                             <button
-                                                key={idx}
-                                                onClick={() => handleSend(rec)}
-                                                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-medium rounded-full border border-indigo-100 transition-colors shadow-sm text-left"
+                                                onClick={toggleListening}
+                                                className={`p-2 rounded-full transition-all ${isListening
+                                                    ? 'bg-red-50 text-red-500 animate-pulse'
+                                                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                                                    }`}
+                                                title={isListening ? "Stop listening" : "Use voice input"}
                                             >
-                                                {rec}
+                                                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
                                             </button>
-                                        ))}
+                                        )}
+                                        <button
+                                            onClick={() => handleSend()}
+                                            disabled={!inputValue.trim()}
+                                            className="p-2 bg-gray-200 text-gray-500 rounded-full hover:bg-indigo-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-200 disabled:hover:text-gray-500 transition-all"
+                                        >
+                                            <Send size={16} className={inputValue.trim() ? "ml-0.5" : ""} />
+                                        </button>
                                     </div>
-                                )}
-                            </div>
-                        ))}
-                        {isTyping && (
-                            <div className="flex justify-start">
-                                <div className="bg-white border border-gray-200 p-3 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-1 ml-10">
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-0"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-300"></div>
+                                </div>
+                                <div className="text-center mt-2 opacity-0 h-0">
+                                    {/* Hidden Footer to save space */}
                                 </div>
                             </div>
-                        )}
-                        <div ref={messagesEndRef} />
-                    </div>
-
-                    {/* Input Area */}
-                    <div className="p-4 bg-white">
-                        {showPrivacyPolicy && (
-                            <div className="flex justify-between items-center bg-transparent px-3 py-2 mb-2 text-xs text-gray-500 animate-fade-in-up">
-                                <span>
-                                    By chatting, you agree to our <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700">privacy policy</a>.
-                                </span>
-                                <button
-                                    onClick={() => setShowPrivacyPolicy(false)}
-                                    className="p-1 hover:bg-gray-200 rounded-full transition-colors"
-                                >
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        )}
-                        <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-2 border border-gray-100 focus-within:border-gray-200 focus-within:shadow-sm transition-all">
-                            <textarea
-                                ref={textareaRef}
-                                value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
-                                onKeyDown={handleKeyPress}
-                                rows={1}
-                                placeholder={isListening ? "Listening..." : "Message..."}
-                                className={`flex-1 bg-transparent border-none focus:ring-0 resize-none py-2 text-sm text-gray-600 placeholder-gray-400 max-h-32 overflow-hidden outline-none ${isListening ? 'animate-pulse placeholder-indigo-500' : ''}`}
-                                style={{ minHeight: '24px' }}
-                            />
-
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                                {isSpeechSupported && (
-                                    <button
-                                        onClick={toggleListening}
-                                        className={`p-2 rounded-full transition-all ${isListening
-                                            ? 'bg-red-50 text-red-500 animate-pulse'
-                                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                                            }`}
-                                        title={isListening ? "Stop listening" : "Use voice input"}
-                                    >
-                                        {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => handleSend()}
-                                    disabled={!inputValue.trim()}
-                                    className="p-2 bg-gray-200 text-gray-500 rounded-full hover:bg-indigo-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-200 disabled:hover:text-gray-500 transition-all"
-                                >
-                                    <Send size={16} className={inputValue.trim() ? "ml-0.5" : ""} />
-                                </button>
-                            </div>
-                        </div>
-                        <div className="text-center mt-2 opacity-0 h-0">
-                            {/* Hidden Footer to save space */}
-                        </div>
-                    </div>
                         </>
                     )}
                 </div>

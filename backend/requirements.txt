@@ -5,3 +5,4 @@ python-multipart
 openai
 tiktoken
 python-docx
+google-generativeai

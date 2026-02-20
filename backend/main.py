@@ -11,16 +11,22 @@ import time
 import re
 
 from openai import AsyncOpenAI
+import google.generativeai as genai
 
-# Load environment variables
+# Load environment variables from various possible locations
+load_dotenv(dotenv_path=".env")
+load_dotenv(dotenv_path="../.env")
 load_dotenv(dotenv_path="../.env.local")
+load_dotenv(dotenv_path="../frontend/.env")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 supabase: Client = None
 openai_client = None
+gemini_model = None
 
 if SUPABASE_URL and SUPABASE_KEY:
     try:
@@ -35,6 +41,14 @@ if OPENAI_API_KEY:
         print("Connected to OpenAI (Async)")
     except Exception as e:
         print(f"Failed to initialize OpenAI: {e}")
+
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+        print("Connected to Gemini")
+    except Exception as e:
+        print(f"Failed to initialize Gemini: {e}")
 
 app = FastAPI(title="LeadQ Chatbot API", version="1.0.0")
 
@@ -66,7 +80,9 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     sessionId: Optional[str] = None
-    user_id: Optional[str] = None # Added user_id support
+    user_id: Optional[str] = None
+    regenerate: bool = False
+ # Added user_id support
 
 class ChatResponse(BaseModel):
     response: str
@@ -191,19 +207,41 @@ Context:
 {context_text}
 """
         
-        try:
-            completion = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": request.message}
-                ],
-                temperature=0.1,
-                max_tokens=300,
-                top_p=0.9
-            )
-            full_response = completion.choices[0].message.content
-            
+        full_response = None
+        
+        # Try OpenAI RAG
+        if openai_client:
+            try:
+                completion = await openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": request.message}
+                    ],
+                    temperature=0.7 if request.regenerate else 0.1,
+                    max_tokens=300,
+                    top_p=0.9
+                )
+                full_response = completion.choices[0].message.content
+            except Exception as e:
+                print(f"OpenAI RAG Error: {e}")
+
+        # Try Gemini RAG Fallback
+        if not full_response and gemini_model:
+            try:
+                generation_config = {
+                    "temperature": 0.7 if request.regenerate else 0.1,
+                    "max_output_tokens": 300,
+                }
+                response = gemini_model.generate_content(
+                    f"{system_prompt}\n\nUser Question: {request.message}",
+                    generation_config=generation_config
+                )
+                full_response = response.text
+            except Exception as e:
+                print(f"Gemini RAG Error: {e}")
+
+        if full_response:
             # Parse Response and Recommendations
             if "###REC###" in full_response:
                 parts = full_response.split("###REC###")
@@ -215,11 +253,10 @@ Context:
                 recommendations = []
                 
             found_match = True
-        except Exception as e:
-            print(f"LLM Generation Error: {e}")
-            response_text = "I'm having trouble connecting to my brain right now. Please try again."
+        else:
+            found_match = False
 
-    if not found_match:
+    if not found_match and not request.regenerate:
         # Fallback to Pattern Matching KB
         for topic, data in KNOWLEDGE_BASE.items():
             # Use strict word boundary regex to avoid false positives (e.g., "plan" in "planner")
@@ -231,11 +268,7 @@ Context:
     
     if not found_match and not context_text:
         # Final Fallback: Controlled General LLM
-        # If the user asks something relevant that isn't in our value store yet (like general definitions),
-        # we allow the LLM to answer BUT restrict it to the domain.
-        
         fallback_prompt = f"""You are Veda, LeadQ's AI assistant for Sales & CRM topics only.
-
 User asked: "{user_message}"
 
 Rules:
@@ -243,35 +276,57 @@ Rules:
 - If unrelated (movies, sports, etc): Say "I specialize in LeadQ and Sales Intelligence. I can't help with that."
 - After your answer, add exactly 3 follow-up questions in this format:
   ###REC###First actual question here|Second actual question here|Third actual question here
-- Each question must be a real, helpful question (max 8 words), NOT placeholders like Q1, Q2, Q3
 """
-
         try:
-             completion = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": fallback_prompt},
-                    {"role": "user", "content": request.message}
-                ],
-                temperature=0.2,
-                max_tokens=250
-            )
-             
-             full_response = completion.choices[0].message.content
-             if "###REC###" in full_response:
-                parts = full_response.split("###REC###")
-                response_text = parts[0].strip()
-                rec_string = parts[1].strip()
-                recommendations = [r.strip() for r in rec_string.split("|") if r.strip()]
-             else:
-                response_text = full_response
-                recommendations = ["What features does LeadQ have?", "How can you help me?", "Contact Support"]
-                
-             found_match = True
+            full_response = None
+            
+            # Try OpenAI first
+            if openai_client:
+                try:
+                    completion = await openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": fallback_prompt},
+                            {"role": "user", "content": request.message}
+                        ],
+                        temperature=0.8 if request.regenerate else 0.2,
+                        max_tokens=250
+                    )
+                    full_response = completion.choices[0].message.content
+                except Exception as e:
+                    print(f"OpenAI Fallback Error: {e}")
+
+            # Try Gemini second
+            if not full_response and gemini_model:
+                try:
+                    generation_config = {
+                        "temperature": 0.8 if request.regenerate else 0.2,
+                        "max_output_tokens": 250,
+                    }
+                    response = gemini_model.generate_content(
+                        f"{fallback_prompt}\n\nUser Question: {request.message}",
+                        generation_config=generation_config
+                    )
+                    full_response = response.text
+                except Exception as e:
+                    print(f"Gemini Fallback Error: {e}")
+
+            if full_response:
+                if "###REC###" in full_response:
+                    parts = full_response.split("###REC###")
+                    response_text = parts[0].strip()
+                    rec_string = parts[1].strip()
+                    recommendations = [r.strip() for r in rec_string.split("|") if r.strip()]
+                else:
+                    response_text = full_response
+                    recommendations = ["What features does LeadQ have?", "How can you help me?", "Contact Support"]
+                found_match = True
+            else:
+                raise Exception("All LLM providers failed")
 
         except Exception as e:
-            print(f"Fallback Generation Error: {e}")
-            response_text = "I'm not sure about that based on my current knowledge. Would you like me to open a support ticket for you?"
+            print(f"Double LLM Fallback Error: {e}")
+            response_text = "I'm having trouble providing a new answer right now. Would you like to try again or open a support ticket?"
             recommendations = ["Open Ticket", "Contact Support"]
     
     latency = (time.time() - start_time) * 1000

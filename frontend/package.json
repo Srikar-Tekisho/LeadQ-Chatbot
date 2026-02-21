@@ -4,16 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:onboarding": "vite --config vite.onboarding.config.ts",
-    "dev:dashboard": "vite --config vite.dashboard.config.ts",
-    "dev:settings": "vite --config vite.settings.config.ts",
-    "dev:chatbot": "vite --config vite.chatbot.config.ts",
-    "dev:all": "concurrently \"npm run dev:onboarding\" \"npm run dev:dashboard\" \"npm run dev:settings\" \"npm run dev:chatbot\"",
-    "build": "vite build",
-    "build:onboarding": "vite build --config vite.onboarding.config.ts",
-    "build:dashboard": "vite build --config vite.dashboard.config.ts",
-    "build:settings": "vite build --config vite.settings.config.ts",
+    "dev": "vite --config vite.chatbot.config.ts",
+    "build": "vite build --config vite.chatbot.config.ts",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -60,6 +60,9 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({ size = 'medium', className = 
                     loop
                     muted
                     playsInline
+                    disablePictureInPicture
+                    disableRemotePlayback
+                    controlsList="nodownload noplaybackrate noremoteplayback"
                     onError={handleVideoError}
                     className={`${sizeClasses[size]} object-contain drop-shadow-xl`}
                     style={{
@@ -76,6 +79,9 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({ size = 'medium', className = 
                         loop
                         muted
                         playsInline
+                        disablePictureInPicture
+                        disableRemotePlayback
+                        controlsList="nodownload noplaybackrate noremoteplayback"
                         className={`${sizeClasses[size]} object-contain drop-shadow-xl`}
                         style={{
                             background: 'transparent',

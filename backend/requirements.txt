@@ -1,8 +1,24 @@
+﻿# FastAPI Framework
 fastapi
-uvicorn
-pydantic
-python-multipart
+uvicorn[standard]
+
+# Database
+supabase>=2.4.0
+
+# AI / LLM
 openai
-tiktoken
-python-docx
 google-generativeai
+tiktoken
+
+# HTTP & Async
+httpx
+python-multipart
+
+# Document Processing (RAG)
+python-docx
+PyPDF2
+
+# Configuration
+python-dotenv
+pydantic
+pydantic-settings
